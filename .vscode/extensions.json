@@ -1,0 +1,8 @@
+{
+  "recommendations": [
+    "golang.go",
+    "bradlc.vscode-tailwindcss",
+    "usernamehw.errorlens",
+    "esbenp.prettier-vscode"
+  ]
+}
