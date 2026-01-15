@@ -51,11 +51,10 @@ A 30-Day Post-Disaster Recovery Companion
 - Frontend
   - React
   - TailwindCSS
-    - [HeadlessUI](https://headlessui.com/)
   - [React UI Chatbot](https://chat-ui.io/docs)
 - Backend
-  - Go Proxy API
-    - [Gin](https://gin-gonic.com/en/)
+  - Python Flask API
+    - `requirements.txt` in backend folder
   - Firebase
     - Firestore DB
     - Auth

@@ -25,7 +25,7 @@ cd wids-datathon-2025
 ```bash
 cd frontend
 npm install
-cp .env.example .env # Add your API keys to .env
+cp .env.example .env
 npm run dev
 ```
 
@@ -35,17 +35,11 @@ App runs on http://localhost:5173
 
 ```bash
 cd backend
-cp .env.example .env
-go mod tidy
-go run main.go
+cp .env.example .env # Add your preferred port and path to Firebase service key to .env
+python3 -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+python server.py
 ```
 
-API runs on http://localhost:3000
-
-### Firebase setup
-
-```bash
-firebase login
-firebase init
-firebase emulators:start
-```
+API runs on http://localhost:3000 by default, unless port changes
