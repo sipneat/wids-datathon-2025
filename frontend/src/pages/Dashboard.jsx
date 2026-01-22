@@ -1,9 +1,27 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { Layout } from '../components/Layout';
 import { Home as HomeIcon, School, Baby, DollarSign, MapPin, Briefcase, CheckCircle, AlertCircle } from 'lucide-react';
 import { Link } from 'react-router-dom';
 
 export default function Dashboard({ userProfile }) {
+  const [intakeResponses, setIntakeResponses] = useState([]);
+
+  useEffect(() => {
+    // Load saved intake responses from localStorage
+    const savedResponses = localStorage.getItem('intakeResponses');
+    if (savedResponses) {
+      try {
+        const parsed = JSON.parse(savedResponses);
+        setIntakeResponses(Object.entries(parsed).map(([key, value]) => ({
+          question_id: key,
+          answer: value
+        })));
+      } catch (error) {
+        console.error('Error parsing saved responses:', error);
+      }
+    }
+  }, []);
+
   const getWelcomeMessage = () => {
     const hour = new Date().getHours();
     if (hour < 12) return 'Good morning';
@@ -179,6 +197,25 @@ export default function Dashboard({ userProfile }) {
             </div>
           </div>
         </div>
+
+        {/* Saved Intake Responses */}
+        {intakeResponses.length > 0 && (
+          <div className="bg-white rounded-xl shadow-sm p-6 border-l-4 border-blue-500">
+            <h2 className="text-2xl font-semibold text-gray-800 mb-4">Your Intake Responses</h2>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {intakeResponses.map((response, index) => (
+                <div key={index} className="p-4 bg-gray-50 rounded-lg border border-gray-200">
+                  <p className="text-sm font-semibold text-gray-600 uppercase tracking-wide mb-2">
+                    {response.question_id.replace(/([A-Z])/g, ' $1').trim()}
+                  </p>
+                  <p className="text-gray-800">
+                    {Array.isArray(response.answer) ? response.answer.join(', ') : String(response.answer)}
+                  </p>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
     </Layout>
   );

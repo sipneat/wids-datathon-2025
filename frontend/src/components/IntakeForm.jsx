@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { ChevronRight, ChevronLeft, Check } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 
@@ -24,48 +24,50 @@ export const IntakeForm = ({ onComplete }) => {
       aiPrompt: 'Tell me about your household size'
     },
     {
+      id: 'displacement_status',
+      question: 'What best describes your current displacement status?',
+      type: 'radio',
+      options: [
+        'Evacuated',
+        'Returned home',
+        'Relocated temporarily',
+        'Relocated permanently',
+        'Unsure'
+      ],
+      aiPrompt: 'Describe your current displacement status'
+    },
+    {
+      id: 'income_change',
+      question: 'Has your income changed due to the fire?',
+      type: 'radio',
+      options: [
+        'No change',
+        'Reduced hours',
+        'Temporarily laid off',
+        'Job lost',
+        'Self-employed revenue loss'
+      ],
+      aiPrompt: 'Tell me about any income changes'
+    },
+    {
       id: 'hasChildren',
       question: 'Do you have children or dependents?',
       type: 'radio',
       options: ['Yes', 'No'],
-      followUp: 'hasChildren',
       aiPrompt: 'Do you have any children or dependents?'
     },
     {
-      id: 'childrenAges',
-      question: 'What are the ages of your children?',
-      type: 'text',
-      placeholder: 'e.g., 5, 8, 12',
+      id: 'school_status',
+      question: 'What is your children\'s current school status?',
+      type: 'radio',
+      options: [
+        'No disruption',
+        'Enrolled but disrupted',
+        'Transferring',
+        'Online/temporary'
+      ],
       showIf: (resp) => resp.hasChildren === 'Yes',
-      aiPrompt: 'What ages are your children?'
-    },
-    {
-      id: 'housingStatus',
-      question: 'What is your current housing situation?',
-      type: 'radio',
-      options: [
-        'Lost my home completely',
-        'Home damaged but standing',
-        'Evacuated but home intact',
-        'Staying with family/friends',
-        'In temporary shelter',
-        'Other'
-      ],
-      aiPrompt: 'Describe your current housing situation'
-    },
-    {
-      id: 'employmentStatus',
-      question: 'What is your current employment status?',
-      type: 'radio',
-      options: [
-        'Currently employed',
-        'Lost job due to evacuation',
-        'Self-employed',
-        'Unemployed',
-        'Retired',
-        'Unable to work'
-      ],
-      aiPrompt: 'What is your employment status?'
+      aiPrompt: 'Tell me about your children\'s school status'
     },
     {
       id: 'hasInsurance',
@@ -75,42 +77,26 @@ export const IntakeForm = ({ onComplete }) => {
       aiPrompt: 'Do you have insurance coverage?'
     },
     {
-      id: 'financialConcerns',
-      question: 'What are your biggest financial concerns right now?',
-      type: 'checkbox',
-      options: [
-        'Immediate housing costs',
-        'Lost income',
-        'Medical expenses',
-        'Childcare costs',
-        'Food and essentials',
-        'Insurance deductibles',
-        'Rebuilding costs'
-      ],
-      aiPrompt: 'What financial challenges are you facing?'
+      id: 'insurance_claim_status',
+      question: 'What is your insurance claim status?',
+      type: 'radio',
+      options: ['Not filed', 'Filed – pending', 'Approved', 'Denied', 'Don\'t know'],
+      showIf: (resp) => resp.hasInsurance && resp.hasInsurance !== 'No',
+      aiPrompt: 'Have you filed an insurance claim?'
     },
     {
-      id: 'priorityNeeds',
-      question: 'What support do you need most urgently?',
+      id: 'caregiving_needs',
+      question: 'Do you have caregiving or health constraints?',
       type: 'checkbox',
-      options: [
-        'Permanent housing',
-        'Temporary shelter',
-        'School enrollment for children',
-        'Childcare services',
-        'Job placement',
-        'Insurance guidance',
-        'Mental health support',
-        'Legal assistance'
-      ],
-      aiPrompt: 'What are your most urgent needs?'
+      options: ['Elder care', 'Disability support', 'Health constraints', 'None'],
+      aiPrompt: 'Any caregiving or health constraints we should know?'
     },
     {
-      id: 'additionalInfo',
-      question: 'Is there anything else you\'d like us to know about your situation?',
-      type: 'textarea',
-      placeholder: 'Share any additional details that might help us support you better...',
-      aiPrompt: 'Is there anything else important we should know?'
+      id: 'housing_budget',
+      question: 'What is your monthly housing budget (USD)?',
+      type: 'number',
+      placeholder: 'e.g., 1500',
+      aiPrompt: 'What is your monthly housing budget?'
     }
   ];
 
@@ -128,19 +114,104 @@ export const IntakeForm = ({ onComplete }) => {
     // Simulate AI response
     setTimeout(() => {
       const aiResponses = {
-        name: `Thank you, ${value}. I'm here to help guide you through this difficult time.`,
-        familySize: value > 1 
-          ? `I understand you have ${value} people in your household. We'll make sure to consider everyone's needs.`
-          : `I'll help you find the support you need during this recovery.`,
+        name: `Thank you, ${value}. I'm here to help guide you.`,
+        familySize: value > 1
+          ? `Thanks — we’ll consider all ${value} household members.`
+          : `Got it. We’ll tailor support to your situation.`,
         hasChildren: value === 'Yes'
-          ? `I see you have children. We'll make sure to connect you with school enrollment and childcare resources.`
-          : `Understood. We'll focus on your specific recovery needs.`,
-        housingStatus: `Thank you for sharing. ${value === 'Lost my home completely' ? 'I\'m so sorry for your loss. We have resources to help you find both temporary and permanent housing.' : 'We\'ll help you navigate your housing options.'}`,
-        default: `Thank you for sharing that information. This helps me understand how to best support you.`
+          ? `Understood. We’ll include school and childcare resources.`
+          : `Okay. We’ll focus on your specific recovery needs.`,
+        displacement_status: `Thanks. We’ll align guidance to your displacement stage (${value}).`,
+        income_change: `Thanks. We’ll prioritize resources for your income change (${value}).`,
+        school_status: `Thanks. We’ll include school continuity guidance (${value}).`,
+        hasInsurance: `Thanks. Insurance guidance will reflect your coverage.`,
+        insurance_claim_status: `Thanks. We’ll tailor next steps to your claim status.`,
+        caregiving_needs: `Thanks. We’ll factor caregiving and health constraints in recommendations.`,
+        housing_budget: `Thanks. We’ll filter housing options to your budget.`,
+        default: `Thanks for sharing — this helps us support you.`
       };
       
       setAiResponse(aiResponses[currentQuestion.id] || aiResponses.default);
     }, 500);
+  };
+
+  // Advance logic that can use a provided responses object
+  const advanceWithResponses = (resp) => {
+    if (currentStep < visibleQuestions.length - 1) {
+      setCurrentStep(currentStep + 1);
+      setAiResponse('');
+    } else {
+      const profile = generateUserProfile(resp);
+      const formattedResponses = Object.entries(resp).map(([questionId, answer]) => ({ question_id: questionId, answer }));
+      postResponsesToBackend(formattedResponses);
+      localStorage.setItem('intakeResponses', JSON.stringify(resp));
+      localStorage.setItem('userId', localStorage.getItem('userId') || `user_${Date.now()}`);
+      onComplete(profile);
+      navigate('/dashboard');
+    }
+  };
+
+  // Allow Enter to move to next; Shift+Enter keeps newline in textarea
+  useEffect(() => {
+    const onKeyDown = (e) => {
+      if (e.key !== 'Enter') return;
+      // If textarea and Shift pressed, allow newline
+      if (currentQuestion?.type === 'textarea' && e.shiftKey) return;
+      if (!canProceed()) return;
+      e.preventDefault();
+      handleNext();
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [currentQuestion, responses, currentStep]);
+
+  // When selecting a radio option, auto-advance to next question
+  const handleRadioSelect = (option) => {
+    const nextResponses = { ...responses, [currentQuestion.id]: option };
+    handleAnswer(option);
+    setTimeout(() => {
+      advanceWithResponses(nextResponses);
+    }, 150);
+  };
+
+  const postResponsesToBackend = async (formattedResponses) => {
+    try {
+      const payload = {
+        responses: formattedResponses,
+        userId: localStorage.getItem('userId') || `user_${Date.now()}`,
+        submittedAt: new Date().toISOString()
+      };
+      
+      const response = await fetch('http://localhost:3000/api/intake/submit', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(payload)
+      });
+      
+      if (!response.ok) {
+        console.warn(`Backend response status: ${response.status}`);
+      }
+      
+      const data = await response.json();
+      console.log('Intake responses saved:', data);
+      return data;
+    } catch (error) {
+      console.warn('Could not submit to backend:', error.message);
+      // Don't block UI - backend not required yet
+    }
+  };
+
+  const formatResponsesForBackend = () => {
+    const formattedResponses = [];
+    Object.entries(responses).forEach(([questionId, answer]) => {
+      formattedResponses.push({
+        question_id: questionId,
+        answer: answer
+      });
+    });
+    return formattedResponses;
   };
 
   const handleNext = () => {
@@ -150,6 +221,15 @@ export const IntakeForm = ({ onComplete }) => {
     } else {
       // Complete intake and generate user profile
       const profile = generateUserProfile(responses);
+      
+      // Format and send responses to backend
+      const formattedResponses = formatResponsesForBackend();
+      postResponsesToBackend(formattedResponses);
+      
+      // Save to localStorage and proceed
+      localStorage.setItem('intakeResponses', JSON.stringify(responses));
+      localStorage.setItem('userId', localStorage.getItem('userId') || `user_${Date.now()}`);
+      
       onComplete(profile);
       navigate('/dashboard');
     }
@@ -163,16 +243,23 @@ export const IntakeForm = ({ onComplete }) => {
   };
 
   const generateUserProfile = (responses) => {
+    const needsEmployment = ['Reduced hours', 'Temporarily laid off', 'Job lost', 'Self-employed revenue loss'].includes(
+      responses.income_change || ''
+    );
+    const needsHousing = ['Evacuated', 'Relocated temporarily'].includes(responses.displacement_status || '');
     return {
       name: responses.name,
       familySize: responses.familySize,
       hasChildren: responses.hasChildren === 'Yes',
-      childrenAges: responses.childrenAges,
-      housingStatus: responses.housingStatus,
-      needsHousing: ['Lost my home completely', 'Home damaged but standing', 'In temporary shelter', 'Staying with family/friends'].includes(responses.housingStatus),
-      needsEmployment: ['Lost job due to evacuation', 'Unemployed'].includes(responses.employmentStatus),
+      childrenAges: responses.childrenAges, // may be undefined in the streamlined intake
+      housingStatus: responses.displacement_status, // map displacement to housingStatus for dashboard
+      needsHousing,
+      needsEmployment,
       hasInsurance: responses.hasInsurance?.includes('Yes'),
       insuranceType: responses.hasInsurance,
+      insuranceClaimStatus: responses.insurance_claim_status,
+      caregivingNeeds: responses.caregiving_needs || [],
+      housingBudget: responses.housing_budget,
       financialConcerns: responses.financialConcerns || [],
       priorityNeeds: responses.priorityNeeds || [],
       additionalInfo: responses.additionalInfo,
@@ -183,6 +270,10 @@ export const IntakeForm = ({ onComplete }) => {
   const canProceed = () => {
     const answer = responses[currentQuestion.id];
     if (!answer) return false;
+    if (currentQuestion.id === 'familySize') {
+      const n = Number(answer);
+      if (!Number.isFinite(n) || n < 1) return false;
+    }
     if (currentQuestion.type === 'checkbox') return answer.length > 0;
     return true;
   };
@@ -221,26 +312,64 @@ export const IntakeForm = ({ onComplete }) => {
               type="text"
               value={responses[currentQuestion.id] || ''}
               onChange={(e) => handleAnswer(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && canProceed()) {
+                  e.preventDefault();
+                  handleNext();
+                }
+              }}
               placeholder={currentQuestion.placeholder}
               className="w-full px-4 py-3 border-2 border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent text-lg"
             />
           )}
 
           {currentQuestion.type === 'number' && (
-            <input
-              type="number"
-              value={responses[currentQuestion.id] || ''}
-              onChange={(e) => handleAnswer(e.target.value)}
-              placeholder={currentQuestion.placeholder}
-              min="1"
-              className="w-full px-4 py-3 border-2 border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent text-lg"
-            />
+            <>
+              <input
+                type="number"
+                value={responses[currentQuestion.id] || ''}
+                onChange={(e) => {
+                  const raw = e.target.value;
+                  if (raw === '') {
+                    handleAnswer('');
+                    return;
+                  }
+                  const parsed = parseInt(raw, 10);
+                  if (Number.isNaN(parsed)) {
+                    return;
+                  }
+                  if (currentQuestion.id === 'familySize') {
+                    handleAnswer(Math.max(1, parsed));
+                  } else {
+                    handleAnswer(Math.max(0, parsed));
+                  }
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && canProceed()) {
+                    e.preventDefault();
+                    handleNext();
+                  }
+                }}
+                placeholder={currentQuestion.placeholder}
+                min={currentQuestion.id === 'familySize' ? 1 : 0}
+                className="w-full px-4 py-3 border-2 border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent text-lg"
+              />
+              {currentQuestion.id === 'familySize' && (
+                <p className="text-sm text-gray-500 mt-2">Include yourself in the count.</p>
+              )}
+            </>
           )}
 
           {currentQuestion.type === 'textarea' && (
             <textarea
               value={responses[currentQuestion.id] || ''}
               onChange={(e) => handleAnswer(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && !e.shiftKey && canProceed()) {
+                  e.preventDefault();
+                  handleNext();
+                }
+              }}
               placeholder={currentQuestion.placeholder}
               rows="5"
               className="w-full px-4 py-3 border-2 border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent text-lg resize-none"
@@ -252,7 +381,7 @@ export const IntakeForm = ({ onComplete }) => {
               {currentQuestion.options.map((option) => (
                 <button
                   key={option}
-                  onClick={() => handleAnswer(option)}
+                  onClick={() => handleRadioSelect(option)}
                   className={`w-full px-6 py-4 rounded-xl border-2 text-left transition-all duration-200 ${
                     responses[currentQuestion.id] === option
                       ? 'border-green-500 bg-green-50 text-green-700'
