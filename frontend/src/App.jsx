@@ -7,6 +7,7 @@ import Community from "./pages/Community";
 import Resources from "./pages/Resources";
 import Housing from "./pages/Housing";
 import Schools from "./pages/Schools";
+import Insurance from "./pages/Insurance";
 
 export default function App() {
   const [userProfile, setUserProfile] = useState(null);
@@ -79,6 +80,12 @@ export default function App() {
           path="/resources" 
           element={
             userProfile ? <Resources userProfile={userProfile} /> : <Navigate to="/login" />
+          } 
+        />
+        <Route 
+          path="/insurance" 
+          element={
+            userProfile ? <Insurance userProfile={userProfile} /> : <Navigate to="/login" />
           } 
         />
         <Route 
