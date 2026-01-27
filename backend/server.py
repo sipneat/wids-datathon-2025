@@ -6,8 +6,14 @@ from dotenv import load_dotenv
 from routes import blueprints
 
 app = Flask(__name__)
-CORS(app)
 load_dotenv()
+
+# Configure CORS to allow requests from the frontend
+CORS(app, 
+     resources={r"/*": {"origins": "*"}},
+     allow_headers=["Content-Type", "Authorization"],
+     methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+     supports_credentials=False)
 
 @app.route('/', methods=['GET'])
 def root():

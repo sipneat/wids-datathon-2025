@@ -1,6 +1,9 @@
 import React, { useEffect, useState } from 'react';
 import { ChevronRight, ChevronLeft, Check } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
+import { auth } from '../services/firebase';
+
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:3000/api';
 
 export const IntakeForm = ({ onComplete }) => {
   const [currentStep, setCurrentStep] = useState(0);
@@ -136,16 +139,19 @@ export const IntakeForm = ({ onComplete }) => {
   };
 
   // Advance logic that can use a provided responses object
-  const advanceWithResponses = (resp) => {
+  const advanceWithResponses = async (resp) => {
     if (currentStep < visibleQuestions.length - 1) {
       setCurrentStep(currentStep + 1);
       setAiResponse('');
     } else {
       const profile = generateUserProfile(resp);
       const formattedResponses = Object.entries(resp).map(([questionId, answer]) => ({ question_id: questionId, answer }));
-      postResponsesToBackend(formattedResponses);
+      await postResponsesToBackend(formattedResponses, profile);
       localStorage.setItem('intakeResponses', JSON.stringify(resp));
-      localStorage.setItem('userId', localStorage.getItem('userId') || `user_${Date.now()}`);
+      const user = auth.currentUser;
+      if (user) {
+        localStorage.setItem('userId', user.uid);
+      }
       onComplete(profile);
       navigate('/dashboard');
     }
@@ -174,32 +180,46 @@ export const IntakeForm = ({ onComplete }) => {
     }, 150);
   };
 
-  const postResponsesToBackend = async (formattedResponses) => {
+  const postResponsesToBackend = async (formattedResponses, userProfile) => {
     try {
+      const user = auth.currentUser;
+      if (!user) {
+        console.error('No authenticated user found');
+        throw new Error('User must be logged in');
+      }
+
+      const idToken = await user.getIdToken();
+      
       const payload = {
-        responses: formattedResponses,
-        userId: localStorage.getItem('userId') || `user_${Date.now()}`,
+        userId: user.uid,
+        email: user.email,
+        displayName: user.displayName,
+        photoURL: user.photoURL,
+        responses: responses,
+        profile: userProfile,
         submittedAt: new Date().toISOString()
       };
       
-      const response = await fetch('http://localhost:3000/api/intake/submit', {
+      const response = await fetch(`${API_BASE_URL}/intake/submit`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          'Authorization': `Bearer ${idToken}`
         },
         body: JSON.stringify(payload)
       });
       
       if (!response.ok) {
-        console.warn(`Backend response status: ${response.status}`);
+        throw new Error(`Backend response status: ${response.status}`);
       }
       
       const data = await response.json();
-      console.log('Intake responses saved:', data);
+      console.log('Intake responses saved via backend:', data);
       return data;
     } catch (error) {
-      console.warn('Could not submit to backend:', error.message);
-      // Don't block UI - backend not required yet
+      console.error('Error saving to backend:', error);
+      alert('There was an error saving your responses. Please try again.');
+      throw error;
     }
   };
 
@@ -214,7 +234,7 @@ export const IntakeForm = ({ onComplete }) => {
     return formattedResponses;
   };
 
-  const handleNext = () => {
+  const handleNext = async () => {
     if (currentStep < visibleQuestions.length - 1) {
       setCurrentStep(currentStep + 1);
       setAiResponse('');
@@ -222,13 +242,16 @@ export const IntakeForm = ({ onComplete }) => {
       // Complete intake and generate user profile
       const profile = generateUserProfile(responses);
       
-      // Format and send responses to backend
+      // Format and send responses to Firebase
       const formattedResponses = formatResponsesForBackend();
-      postResponsesToBackend(formattedResponses);
+      await postResponsesToBackend(formattedResponses, profile);
       
       // Save to localStorage and proceed
       localStorage.setItem('intakeResponses', JSON.stringify(responses));
-      localStorage.setItem('userId', localStorage.getItem('userId') || `user_${Date.now()}`);
+      const user = auth.currentUser;
+      if (user) {
+        localStorage.setItem('userId', user.uid);
+      }
       
       onComplete(profile);
       navigate('/dashboard');

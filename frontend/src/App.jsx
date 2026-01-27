@@ -8,18 +8,43 @@ import Resources from "./pages/Resources";
 import Housing from "./pages/Housing";
 import Schools from "./pages/Schools";
 import Insurance from "./pages/Insurance";
+import { auth } from "./services/firebase";
+import { onAuthStateChanged } from 'firebase/auth';
+
+const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000/api';
 
 export default function App() {
   const [userProfile, setUserProfile] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
-    // Check for saved user profile on mount
-    const savedProfile = localStorage.getItem('userProfile');
-    if (savedProfile) {
-      setUserProfile(JSON.parse(savedProfile));
-    }
-    setIsLoading(false);
+    // Listen to Firebase auth state changes
+    const unsubscribe = onAuthStateChanged(auth, async (user) => {
+      if (user) {
+        // User is signed in, try to load their profile from backend
+        try {
+          const idToken = await user.getIdToken();
+          const response = await fetch(`${API_BASE_URL}/user/profile/${user.uid}`, {
+            headers: {
+              'Authorization': `Bearer ${idToken}`
+            }
+          });
+          
+          if (response.ok) {
+            const profile = await response.json();
+            setUserProfile({ ...profile, uid: user.uid, email: user.email });
+          }
+        } catch (error) {
+          console.error('Error fetching user profile:', error);
+        }
+      } else {
+        // User is signed out
+        setUserProfile(null);
+      }
+      setIsLoading(false);
+    });
+
+    return () => unsubscribe();
   }, []);
 
   const handleIntakeComplete = (profile) => {
