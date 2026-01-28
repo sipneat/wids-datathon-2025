@@ -18,6 +18,27 @@ export default function App() {
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
+    // Demo mode (no Firebase configured): don't block the UI behind auth.
+    if (!auth) {
+      const saved = localStorage.getItem('userProfile');
+      if (saved) {
+        try {
+          setUserProfile(JSON.parse(saved));
+        } catch {
+          // ignore parse errors
+        }
+      }
+      // Provide a minimal demo profile so protected routes render.
+      setUserProfile((prev) => prev || {
+        name: 'Demo User',
+        hasChildren: true,
+        needsHousing: true,
+        hasInsurance: true
+      });
+      setIsLoading(false);
+      return;
+    }
+
     // Listen to Firebase auth state changes
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
       if (user) {
