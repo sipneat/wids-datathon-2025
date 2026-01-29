@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Layout } from '../components/Layout';
 import { School, MapPin, Users, Star, Calendar, Phone, Mail, ExternalLink, Clock, Award, CheckCircle } from 'lucide-react';
-import { defaultSchools, defaultEnrollmentSteps, defaultResources } from '../data/schoolsData';
+import { defaultSchools, defaultEnrollmentSteps, defaultResources, defaultOnlineOptions, defaultRecoveryPlans } from '../data/schoolsData';
 import schoolsService from '../services/schoolsService';
 
 export default function Schools({ 
@@ -32,6 +32,8 @@ export default function Schools({
   schools: schoolsProp,
   enrollmentSteps: enrollmentStepsProp,
   resources: resourcesProp,
+  onlineOptions: onlineOptionsProp,
+  recoveryPlans: recoveryPlansProp,
   // Filter options
   filterOptions = {
     gradeLevels: [
@@ -77,8 +79,90 @@ export default function Schools({
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState(null);
 
+  // Recommendation inputs (near parent jobs / outside fire radius)
+  const [workZipsInput, setWorkZipsInput] = useState(() => {
+    return localStorage.getItem('schools.workZipsInput') || '';
+  });
+  const [maxCommuteMinutes, setMaxCommuteMinutes] = useState(() => {
+    const stored = localStorage.getItem('schools.maxCommuteMinutes');
+    const num = stored ? Number(stored) : 30;
+    return Number.isFinite(num) && num > 0 ? num : 30;
+  });
+  const [preferOutsideFireRadius, setPreferOutsideFireRadius] = useState(() => {
+    const stored = localStorage.getItem('schools.preferOutsideFireRadius');
+    return stored ? JSON.parse(stored) : true;
+  });
+  const [appliedQuery, setAppliedQuery] = useState(() => {
+    const storedWorkZips = localStorage.getItem('schools.workZipsApplied') || '';
+    const storedMaxCommute = localStorage.getItem('schools.maxCommuteApplied');
+    const storedPreferOutside = localStorage.getItem('schools.preferOutsideFireRadiusApplied');
+
+    const workZips = storedWorkZips
+      .split(',')
+      .map((z) => z.trim())
+      .filter(Boolean);
+
+    const maxCommute = storedMaxCommute ? Number(storedMaxCommute) : 30;
+    const preferOutside =
+      storedPreferOutside !== null ? JSON.parse(storedPreferOutside) : true;
+
+    return {
+      workZips,
+      maxCommuteMinutes: Number.isFinite(maxCommute) && maxCommute > 0 ? maxCommute : 30,
+      preferOutsideFireRadius: preferOutside
+    };
+  });
+
   // Insurance-style: internal data that can be loaded async
   const [loadedData, setLoadedData] = useState(null);
+
+  const intakeResponses = useMemo(() => {
+    try {
+      return JSON.parse(localStorage.getItem('intakeResponses') || '{}');
+    } catch {
+      return {};
+    }
+  }, []);
+
+  const applyRecommendationFilters = () => {
+    const workZips = workZipsInput
+      .split(',')
+      .map((z) => z.trim())
+      .filter(Boolean);
+
+    setAppliedQuery({
+      workZips,
+      maxCommuteMinutes: Number(maxCommuteMinutes) || 30,
+      preferOutsideFireRadius: Boolean(preferOutsideFireRadius)
+    });
+  };
+
+  // Persist user preferences locally
+  useEffect(() => {
+    localStorage.setItem('schools.workZipsInput', workZipsInput);
+    localStorage.setItem('schools.maxCommuteMinutes', String(maxCommuteMinutes));
+    localStorage.setItem(
+      'schools.preferOutsideFireRadius',
+      JSON.stringify(preferOutsideFireRadius)
+    );
+  }, [workZipsInput, maxCommuteMinutes, preferOutsideFireRadius]);
+
+  // Persist last applied query for recommendations
+  useEffect(() => {
+    if (!appliedQuery) return;
+    localStorage.setItem(
+      'schools.workZipsApplied',
+      (appliedQuery.workZips || []).join(', ')
+    );
+    localStorage.setItem(
+      'schools.maxCommuteApplied',
+      String(appliedQuery.maxCommuteMinutes ?? 30)
+    );
+    localStorage.setItem(
+      'schools.preferOutsideFireRadiusApplied',
+      JSON.stringify(appliedQuery.preferOutsideFireRadius ?? true)
+    );
+  }, [appliedQuery]);
 
   // Load schools data on mount (Insurance-style pattern)
   useEffect(() => {
@@ -91,7 +175,12 @@ export default function Schools({
         
         // Use provided loader or default service
         const dataLoader = loadSchoolsData || schoolsService.getSchoolsData.bind(schoolsService);
-        const data = await dataLoader(userProfile);
+        const data = await dataLoader(userProfile, {
+          intakeResponses,
+          // For DB-backed recommendations:
+          homeZip: searchZip.trim() || userProfile?.zipCode || null,
+          ...appliedQuery
+        });
         
         if (!cancelled) {
           setLoadedData(data || {});
@@ -115,7 +204,7 @@ export default function Schools({
     return () => {
       cancelled = true;
     };
-  }, [userProfile, loadSchoolsData]);
+  }, [userProfile, loadSchoolsData, appliedQuery, intakeResponses]);
 
   // Decide final inputs (priority: loadedData > props > defaults)
   const effectivePageConfig = loadedData?.pageConfig || pageConfig;
@@ -124,6 +213,8 @@ export default function Schools({
   const schools = loadedData?.schools ?? schoolsProp ?? defaultSchools;
   const enrollmentSteps = loadedData?.enrollmentSteps ?? enrollmentStepsProp ?? defaultEnrollmentSteps;
   const resources = loadedData?.resources ?? resourcesProp ?? defaultResources;
+  const onlineOptions = loadedData?.onlineOptions ?? onlineOptionsProp ?? defaultOnlineOptions;
+  const recoveryPlans = loadedData?.recoveryPlans ?? recoveryPlansProp ?? defaultRecoveryPlans;
 
   // Calculate stats dynamically
   const calculatedStats = useMemo(() => {
@@ -238,6 +329,60 @@ export default function Schools({
               </select>
             )}
           </div>
+
+          {/* Recommendation filters (DB-backed when available) */}
+          <div className="mt-5 pt-5 border-t border-gray-200">
+            <div className="flex flex-col lg:flex-row gap-4 items-start lg:items-end">
+              <div className="flex-1">
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Parent work ZIPs (comma-separated)
+                </label>
+                <input
+                  type="text"
+                  value={workZipsInput}
+                  onChange={(e) => setWorkZipsInput(e.target.value)}
+                  placeholder="e.g. 95050, 94025"
+                  className="w-full px-4 py-3 border-2 border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-purple-500"
+                />
+                <p className="text-xs text-gray-500 mt-1">
+                  Used to recommend schools near work and outside the fire radius (requires backend data).
+                </p>
+              </div>
+
+              <div className="w-full lg:w-64">
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Max commute (minutes)
+                </label>
+                <input
+                  type="number"
+                  min="5"
+                  max="180"
+                  value={maxCommuteMinutes}
+                  onChange={(e) => setMaxCommuteMinutes(e.target.value)}
+                  className="w-full px-4 py-3 border-2 border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-purple-500"
+                />
+              </div>
+
+              <div className="w-full lg:w-auto">
+                <label className="inline-flex items-center space-x-2 text-sm text-gray-700 select-none">
+                  <input
+                    type="checkbox"
+                    checked={preferOutsideFireRadius}
+                    onChange={(e) => setPreferOutsideFireRadius(e.target.checked)}
+                    className="h-4 w-4 rounded border-gray-300 text-purple-600 focus:ring-purple-500"
+                  />
+                  <span>Prefer schools outside fire radius</span>
+                </label>
+              </div>
+
+              <button
+                onClick={applyRecommendationFilters}
+                className="w-full lg:w-auto px-5 py-3 bg-purple-600 text-white rounded-xl hover:bg-purple-700 transition-colors font-semibold"
+              >
+                Apply
+              </button>
+            </div>
+          </div>
         </div>
 
         {/* School Listings */}
@@ -332,6 +477,11 @@ export default function Schools({
                         <span className="font-semibold">Start Date:</span> {school.startDate}
                       </p>
                     )}
+                    {school.enrollmentTimeline && (
+                      <p className="text-sm text-gray-600 mb-3">
+                        <span className="font-semibold">Enrollment timeline:</span> {school.enrollmentTimeline}
+                      </p>
+                    )}
                     <div className="flex space-x-2">
                       <button 
                         onClick={() => setSelectedSchool(school)}
@@ -378,6 +528,110 @@ export default function Schools({
                   </div>
                 );
               })}
+            </div>
+          </div>
+        )}
+
+        {/* Online Learning Options */}
+        {onlineOptions && onlineOptions.length > 0 && (
+          <div className="bg-white rounded-xl shadow-sm p-6">
+            <h2 className="text-2xl font-semibold text-gray-800 mb-6">Online Learning Options</h2>
+            <p className="text-sm text-gray-600 mb-4">
+              If returning to a physical school right away is hard, these online options can help your child stay on track while you sort out housing and school placement.
+            </p>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              {onlineOptions.map((option, index) => (
+                <div key={index} className="bg-gradient-to-br from-purple-50 to-blue-50 border border-purple-100 rounded-xl p-5 flex flex-col h-full">
+                  <div className="mb-3">
+                    <p className="text-xs font-semibold uppercase tracking-wide text-purple-700">
+                      {option.type}
+                    </p>
+                    <h3 className="text-lg font-semibold text-gray-900 mt-1">
+                      {option.title}
+                    </h3>
+                  </div>
+                  <p className="text-sm text-gray-700 mb-3 flex-1">
+                    {option.description}
+                  </p>
+                  <div className="space-y-1 text-xs text-gray-700 mb-3">
+                    {option.gradeLevels && (
+                      <p>
+                        <span className="font-semibold">Grades:</span> {option.gradeLevels}
+                      </p>
+                    )}
+                    {option.cost && (
+                      <p>
+                        <span className="font-semibold">Cost:</span> {option.cost}
+                      </p>
+                    )}
+                    {option.timeline && (
+                      <p>
+                        <span className="font-semibold">Timeline to start:</span> {option.timeline}
+                      </p>
+                    )}
+                    {option.techSupport && (
+                      <p>
+                        <span className="font-semibold">Support:</span> {option.techSupport}
+                      </p>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Recovery Timeline & District Plans */}
+        {recoveryPlans && recoveryPlans.length > 0 && (
+          <div className="bg-gradient-to-r from-orange-50 to-red-50 rounded-xl p-6 border border-orange-200">
+            <h2 className="text-2xl font-semibold text-gray-800 mb-4">
+              Recovery Timeline for Affected Schools
+            </h2>
+            <p className="text-sm text-gray-700 mb-6">
+              This is a typical pattern districts follow after a major fire. Your local district may be at a different phase, but this can help you plan school stability and ask the right questions.
+            </p>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              {recoveryPlans.map((phase, index) => (
+                <div key={index} className="bg-white rounded-xl shadow-sm p-5 flex flex-col h-full">
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="inline-flex items-center justify-center w-7 h-7 rounded-full bg-orange-500 text-white text-sm font-bold">
+                      {index + 1}
+                    </span>
+                    <span className="text-xs font-semibold uppercase tracking-wide text-orange-700">
+                      {phase.focus}
+                    </span>
+                  </div>
+                  <h3 className="text-sm font-semibold text-gray-900 mb-2">
+                    {phase.phase}
+                  </h3>
+                  <p className="text-xs text-gray-700 mb-3 flex-1">
+                    {phase.description}
+                  </p>
+                  {phase.typicalActions && phase.typicalActions.length > 0 && (
+                    <div className="mt-1">
+                      <p className="text-xs font-semibold text-gray-800 mb-1">
+                        What districts typically do:
+                      </p>
+                      <ul className="space-y-1 text-xs text-gray-700 list-disc ml-4">
+                        {phase.typicalActions.map((action, i) => (
+                          <li key={i}>{action}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+            <div className="mt-6 bg-white/70 border border-orange-200 rounded-lg p-4">
+              <h3 className="text-sm font-semibold text-gray-900 mb-1">
+                Questions to ask your district
+              </h3>
+              <ul className="space-y-1 text-xs text-gray-800 list-disc ml-4">
+                <li>Is my child’s current school inside the fire impact zone or scheduled for relocation?</li>
+                <li>Where will their teachers and classmates be learning in the next 1–3 months?</li>
+                <li>Is there a plan to keep them at one “receiving” school for the rest of the year to avoid multiple moves?</li>
+                <li>What transportation will be provided from our temporary housing to that school?</li>
+              </ul>
             </div>
           </div>
         )}
@@ -481,6 +735,13 @@ export default function Schools({
                           </li>
                         ))}
                       </ul>
+                    </div>
+                  )}
+
+                  {selectedSchool.enrollmentTimeline && (
+                    <div>
+                      <h3 className="font-semibold text-gray-800 mb-2">Enrollment Timeline</h3>
+                      <p className="text-gray-600">{selectedSchool.enrollmentTimeline}</p>
                     </div>
                   )}
 

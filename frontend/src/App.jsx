@@ -8,6 +8,7 @@ import Resources from "./pages/Resources";
 import Housing from "./pages/Housing";
 import Schools from "./pages/Schools";
 import Insurance from "./pages/Insurance";
+import Employment from "./pages/Employment";
 import { auth } from "./services/firebase";
 import { onAuthStateChanged } from 'firebase/auth';
 
@@ -114,6 +115,12 @@ export default function App() {
           path="/schools" 
           element={
             userProfile ? <Schools userProfile={userProfile} /> : <Navigate to="/login" />
+          } 
+        />
+        <Route 
+          path="/employment" 
+          element={
+            userProfile ? <Employment userProfile={userProfile} /> : <Navigate to="/login" />
           } 
         />
         <Route 

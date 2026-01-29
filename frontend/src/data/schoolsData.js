@@ -158,3 +158,69 @@ export const defaultResources = [
     icon: Award
   }
 ];
+
+export const defaultOnlineOptions = [
+  {
+    title: 'District Virtual Learning Academy',
+    type: 'Local District Program',
+    description: 'Full-time online option run by your public school district, with live classes and support for displaced students.',
+    gradeLevels: 'K-12',
+    cost: 'Free for in-district students',
+    timeline: 'Can usually start within 3–7 days of enrollment',
+    techSupport: 'Device and hotspot assistance may be available'
+  },
+  {
+    title: 'Statewide Online School',
+    type: 'State-Approved Program',
+    description: 'Accredited statewide online school for students who cannot immediately return to a physical classroom.',
+    gradeLevels: '3-12',
+    cost: 'Varies by state; often free for residents',
+    timeline: 'Enrollment windows typically every 2–4 weeks',
+    techSupport: 'Self-paced with virtual teacher support'
+  },
+  {
+    title: 'Short-Term Online Bridge',
+    type: 'Temporary Option',
+    description: 'Short-term online coursework to keep students on track while families sort out housing and school placement.',
+    gradeLevels: '6-12',
+    cost: 'Low-cost or scholarship-based',
+    timeline: 'Start within 1–3 days; lasts 4–12 weeks',
+    techSupport: 'Focus on core subjects and credit recovery'
+  }
+];
+
+export const defaultRecoveryPlans = [
+  {
+    phase: 'First 0–2 weeks',
+    focus: 'Safety checks & temporary learning',
+    description:
+      'District inspects buildings, confirms structural safety, checks air quality, and coordinates with fire officials. Students may be in emergency shelters, community centers, or online only.',
+    typicalActions: [
+      'District communicates initial status for each school (safe, damaged, closed)',
+      'Short-term online learning or learning packets while sites are evaluated',
+      'Transportation plans paused or rerouted around closure zones'
+    ]
+  },
+  {
+    phase: 'Weeks 2–8',
+    focus: 'Temporary relocation & stable routines',
+    description:
+      'For schools inside the fire radius or with major smoke/water damage, districts often relocate students and teachers to undamaged campuses, shared double sessions, or temporary modular buildings.',
+    typicalActions: [
+      'Announce which schools are relocating and where (host campuses or temporary sites)',
+      'Pair your child’s current school with a “host” school for the rest of the term',
+      'Set approximate target date for reopening or re-evaluation'
+    ]
+  },
+  {
+    phase: '2–12+ months',
+    focus: 'Rebuild & long‑term stability',
+    description:
+      'Damaged schools are repaired or rebuilt. Districts may keep students at temporary sites for the full school year to avoid multiple moves.',
+    typicalActions: [
+      'Publish rebuild / major repair timelines by campus',
+      'Offer transfers to other local schools outside the fire radius',
+      'Coordinate transportation from temporary housing areas to stable “receiving” schools'
+    ]
+  }
+];
