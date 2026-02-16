@@ -8,12 +8,21 @@ from routes import blueprints
 app = Flask(__name__)
 load_dotenv()
 
+# Get allowed origins from environment or use defaults
+FRONTEND_URL = os.getenv('FRONTEND_URL', 'http://localhost:5173')
+ALLOWED_ORIGINS = [
+    'http://localhost:5173',
+    'http://localhost:5174',
+    'http://localhost:3000',
+    FRONTEND_URL
+]
+
 # Configure CORS to allow requests from the frontend
 CORS(app, 
-     resources={r"/*": {"origins": "*"}},
+     resources={r"/*": {"origins": ALLOWED_ORIGINS}},
      allow_headers=["Content-Type", "Authorization"],
      methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-     supports_credentials=False)
+     supports_credentials=True)
 
 @app.route('/', methods=['GET'])
 def root():

@@ -47,8 +47,11 @@ export default function App() {
         try {
           const idToken = await user.getIdToken();
           const response = await fetch(`${API_BASE_URL}/user/profile/${user.uid}`, {
+            method: 'GET',
+            credentials: 'include',
             headers: {
-              'Authorization': `Bearer ${idToken}`
+              'Authorization': `Bearer ${idToken}`,
+              'Content-Type': 'application/json'
             }
           });
           
