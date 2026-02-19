@@ -8,6 +8,7 @@ import Resources from "./pages/Resources";
 import Housing from "./pages/Housing";
 import Schools from "./pages/Schools";
 import Insurance from "./pages/Insurance";
+import Employment from "./pages/Employment";
 import { auth } from "./services/firebase";
 import { onAuthStateChanged } from 'firebase/auth';
 
@@ -18,6 +19,27 @@ export default function App() {
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
+    // Demo mode (no Firebase configured): don't block the UI behind auth.
+    if (!auth) {
+      const saved = localStorage.getItem('userProfile');
+      if (saved) {
+        try {
+          setUserProfile(JSON.parse(saved));
+        } catch {
+          // ignore parse errors
+        }
+      }
+      // Provide a minimal demo profile so protected routes render.
+      setUserProfile((prev) => prev || {
+        name: 'Demo User',
+        hasChildren: true,
+        needsHousing: true,
+        hasInsurance: true
+      });
+      setIsLoading(false);
+      return;
+    }
+
     // Listen to Firebase auth state changes
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
       if (user) {
@@ -25,8 +47,11 @@ export default function App() {
         try {
           const idToken = await user.getIdToken();
           const response = await fetch(`${API_BASE_URL}/user/profile/${user.uid}`, {
+            method: 'GET',
+            credentials: 'include',
             headers: {
-              'Authorization': `Bearer ${idToken}`
+              'Authorization': `Bearer ${idToken}`,
+              'Content-Type': 'application/json'
             }
           });
           
@@ -93,6 +118,12 @@ export default function App() {
           path="/schools" 
           element={
             userProfile ? <Schools userProfile={userProfile} /> : <Navigate to="/login" />
+          } 
+        />
+        <Route 
+          path="/employment" 
+          element={
+            userProfile ? <Employment userProfile={userProfile} /> : <Navigate to="/login" />
           } 
         />
         <Route 

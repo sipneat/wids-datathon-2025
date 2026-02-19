@@ -12,16 +12,34 @@ const firebaseConfig = {
   appId: import.meta.env.VITE_FIREBASE_APP_ID
 };
 
-// Initialize Firebase
-const app = initializeApp(firebaseConfig);
-const auth = getAuth(app);
-const googleProvider = new GoogleAuthProvider();
+const isFirebaseConfigured =
+  Boolean(firebaseConfig.apiKey) &&
+  Boolean(firebaseConfig.authDomain) &&
+  Boolean(firebaseConfig.projectId);
+
+// Initialize Firebase (guarded so missing env doesn't hard-crash the whole UI)
+let app = null;
+let auth = null;
+let googleProvider = null;
+
+if (isFirebaseConfigured) {
+  app = initializeApp(firebaseConfig);
+  auth = getAuth(app);
+  googleProvider = new GoogleAuthProvider();
+} else {
+  console.warn(
+    '[firebase] Missing VITE_FIREBASE_* config. Running in demo mode (auth disabled).'
+  );
+}
 
 // Backend API URL
 const API_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:3000/api';
 
 // Helper function to get auth token
 const getAuthToken = async () => {
+  if (!auth) {
+    throw new Error('Firebase not configured');
+  }
   const user = auth.currentUser;
   if (!user) {
     throw new Error('User not authenticated');
@@ -32,6 +50,9 @@ const getAuthToken = async () => {
 // Auth functions - Frontend only handles authentication
 export const signInWithGoogle = async () => {
   try {
+    if (!auth || !googleProvider) {
+      throw new Error('Firebase not configured');
+    }
     const result = await signInWithPopup(auth, googleProvider);
     return result.user;
   } catch (error) {
@@ -42,6 +63,7 @@ export const signInWithGoogle = async () => {
 
 export const logOut = async () => {
   try {
+    if (!auth) return;
     await signOut(auth);
   } catch (error) {
     console.error('Error signing out:', error);
