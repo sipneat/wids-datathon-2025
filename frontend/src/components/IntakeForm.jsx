@@ -40,6 +40,25 @@ export const IntakeForm = ({ onComplete }) => {
       aiPrompt: 'Describe your current displacement status'
     },
     {
+      id: 'fire_severity',
+      question: 'How severe was the fire that affected you?',
+      type: 'radio',
+      options: [
+        'Minor – minimal property damage',
+        'Moderate – significant damage but structure intact',
+        'Severe – structure destroyed or uninhabitable',
+        'Catastrophic – total loss, multiple structures affected'
+      ],
+      aiPrompt: 'Describe the severity of the fire'
+    },
+    {
+      id: 'fire_radius',
+      question: 'What was the approximate radius of the fire (in miles)?',
+      type: 'number',
+      placeholder: 'e.g., 5',
+      aiPrompt: 'Estimate the fire radius in miles'
+    },
+    {
       id: 'income_change',
       question: 'Has your income changed due to the fire?',
       type: 'radio',
