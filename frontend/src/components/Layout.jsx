@@ -1,6 +1,7 @@
-import React, { useState } from 'react';
-import { Home, MessageCircle, BookOpen, Menu, X, Users, School, Baby, DollarSign, MapPin, Briefcase, LogOut } from 'lucide-react';
+import { useState } from 'react';
+import { Home, BookOpen, Menu, X, Users, DollarSign, MapPin, LogOut, Sparkles } from 'lucide-react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
+import { signOutUser } from '../services/firebase';
 
 export const Layout = ({ children, userProfile }) => {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -10,10 +11,8 @@ export const Layout = ({ children, userProfile }) => {
   // Define all possible navigation items
   const allNavItems = [
     { id: 'dashboard', label: 'Dashboard', icon: Home, path: '/dashboard', alwaysShow: true },
+    { id: 'assistant', label: 'Assistant', icon: Sparkles, path: '/assistant', alwaysShow: true },
     { id: 'housing', label: 'Housing', icon: MapPin, path: '/housing', condition: 'needsHousing' },
-    { id: 'schools', label: 'Schools', icon: School, path: '/schools', condition: 'hasChildren' },
-    { id: 'childcare', label: 'Childcare', icon: Baby, path: '/childcare', condition: 'hasChildren' },
-    { id: 'employment', label: 'Employment', icon: Briefcase, path: '/employment', condition: 'needsEmployment' },
     { id: 'insurance', label: 'Insurance', icon: DollarSign, path: '/insurance', alwaysShow: true },
     { id: 'community', label: 'Community', icon: Users, path: '/community', alwaysShow: true },
     { id: 'resources', label: 'Resources', icon: BookOpen, path: '/resources', alwaysShow: true }
@@ -33,14 +32,18 @@ export const Layout = ({ children, userProfile }) => {
   const navItems = getVisibleNavItems();
   const isActive = (path) => location.pathname === path;
 
-  const handleLogout = () => {
-    // Clear user session and redirect to login
-    localStorage.removeItem('userProfile');
-    navigate('/login');
+  const handleLogout = async () => {
+    try {
+      await signOutUser();
+    } catch (error) {
+      console.error('Failed to sign out:', error);
+    } finally {
+      navigate('/login');
+    }
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 via-green-50 to-blue-50">
+    <div className="min-h-screen bg-linear-to-br from-blue-50 via-green-50 to-blue-50">
       {/* Header */}
       <header className="bg-white/80 backdrop-blur-sm shadow-sm sticky top-0 z-50">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">

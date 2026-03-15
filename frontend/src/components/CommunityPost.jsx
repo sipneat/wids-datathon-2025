@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { MessageCircle } from 'lucide-react';
 
 export const CommunityPost = ({ post, onReply }) => {
@@ -15,7 +15,7 @@ export const CommunityPost = ({ post, onReply }) => {
   return (
     <div className="bg-white rounded-xl shadow-sm p-6 border border-gray-100 hover:shadow-md transition-shadow duration-200">
       <div className="flex items-start space-x-3">
-        <div className="w-10 h-10 rounded-full bg-gradient-to-br from-green-400 to-blue-500 flex items-center justify-center text-white font-semibold">
+        <div className="w-10 h-10 rounded-full bg-linear-to-br from-green-400 to-blue-500 flex items-center justify-center text-white font-semibold">
           {post.user.charAt(0).toUpperCase()}
         </div>
         <div className="flex-1">

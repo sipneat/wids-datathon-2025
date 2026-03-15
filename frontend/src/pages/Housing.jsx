@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { Layout } from '../components/Layout';
 import { Home, MapPin, DollarSign, Calendar, Search, ExternalLink, Phone, Heart, Bed, Bath, Maximize, Filter, AlertCircle, Briefcase, Activity, Users } from 'lucide-react';
 
@@ -16,12 +16,11 @@ export default function Housing({ userProfile }) {
     nearHealth: false
   });
 
-  // Determine user's housing situation from intake responses
-  const intakeResponses = JSON.parse(localStorage.getItem('intakeResponses') || '{}');
-  const hasJob = !intakeResponses.income_change || intakeResponses.income_change === 'No change';
-  const needsRelocation = intakeResponses.displacement_status === 'Displaced' || intakeResponses.displacement_status === 'Temporary housing';
+  // Determine user's housing situation from profile data
+  const hasJob = !userProfile?.needsEmployment;
+  const needsRelocation = !!userProfile?.needsHousing;
   const hasHealthConcerns = false; // Could be derived from additional intake questions
-  const needsAccessibility = intakeResponses.caregiving_needs === 'Yes' || userProfile?.hasDisabilities;
+  const needsAccessibility = (userProfile?.caregivingNeeds || []).length > 0 || userProfile?.hasDisabilities;
   const hasInsurance = userProfile?.hasInsurance;
   const homeBurned = needsRelocation; // Simplified - could be more specific
 
@@ -187,7 +186,7 @@ export default function Housing({ userProfile }) {
 
   // Determine personalized guidance message
   const getGuidanceMessage = () => {
-    if (!hasJob && !intakeResponses.income_change) {
+    if (!userProfile) {
       return {
         title: 'Income Assessment Needed',
         message: 'We recommend completing your financial assessment first to better understand your housing budget.',
@@ -256,7 +255,7 @@ export default function Housing({ userProfile }) {
     <Layout userProfile={userProfile}>
       <div className="max-w-7xl mx-auto space-y-6">
         {/* Header */}
-        <div className="bg-gradient-to-r from-green-600 to-blue-600 rounded-2xl shadow-lg p-8 text-white">
+        <div className="bg-linear-to-r from-green-600 to-blue-600 rounded-2xl shadow-lg p-8 text-white">
           <div className="flex items-center space-x-3 mb-3">
             <Home className="w-8 h-8" />
             <h1 className="text-3xl font-bold">Housing Assistance</h1>
@@ -277,7 +276,7 @@ export default function Housing({ userProfile }) {
           'bg-blue-50 border-blue-300'
         }`}>
           <div className="flex items-start space-x-4">
-            <GuidanceIcon className={`w-6 h-6 flex-shrink-0 mt-1 ${
+            <GuidanceIcon className={`w-6 h-6 shrink-0 mt-1 ${
               guidance.type === 'warning' ? 'text-yellow-600' :
               guidance.type === 'success' ? 'text-green-600' :
               'text-blue-600'
@@ -332,7 +331,7 @@ export default function Housing({ userProfile }) {
 
         {/* Relocation Support for Home Loss */}
         {needsRelocation && homeBurned && hasInsurance && (
-          <div className="bg-gradient-to-r from-orange-50 to-red-50 rounded-xl shadow-sm p-6 border border-orange-200">
+          <div className="bg-linear-to-r from-orange-50 to-red-50 rounded-xl shadow-sm p-6 border border-orange-200">
             <h2 className="text-xl font-semibold text-gray-800 mb-4 flex items-center space-x-2">
               <Home className="w-5 h-5 text-orange-600" />
               <span>Home Reconstruction Path</span>
@@ -459,7 +458,7 @@ export default function Housing({ userProfile }) {
         {/* Map Section */}
         {showMap && (
           <div className="bg-white rounded-xl shadow-sm overflow-hidden">
-            <div className="h-96 bg-gradient-to-br from-blue-100 to-green-100 relative">
+            <div className="h-96 bg-linear-to-br from-blue-100 to-green-100 relative">
               {/* Placeholder for actual map - you would integrate Google Maps or Mapbox here */}
               <div className="absolute inset-0 flex items-center justify-center">
                 <div className="text-center">
@@ -641,7 +640,7 @@ export default function Housing({ userProfile }) {
         </div>
 
         {/* Resources Section */}
-        <div className="bg-gradient-to-r from-blue-50 to-green-50 rounded-xl p-6 border border-blue-200">
+        <div className="bg-linear-to-r from-blue-50 to-green-50 rounded-xl p-6 border border-blue-200">
           <h2 className="text-2xl font-semibold text-gray-800 mb-4">Housing Assistance Programs</h2>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div className="bg-white p-5 rounded-xl shadow-sm">

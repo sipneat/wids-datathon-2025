@@ -1,0 +1,233 @@
+import { useMemo, useState } from 'react';
+import { Send, Sparkles, Bot, User, Lightbulb } from 'lucide-react';
+import { Layout } from '../components/Layout';
+import { sendChatMessage } from '../services/routes';
+
+const starterPrompts = [
+  'I was displaced and still need to get to work. What should I do first?',
+  'My insurance claim is pending. What can I do this week?',
+  'I need temporary housing under $1800/month near schools.',
+  'I have caregiving responsibilities and need accessible housing options.'
+];
+
+const initialMessages = [
+  {
+    id: 'welcome',
+    role: 'assistant',
+    content:
+      'I am your Recovery Assistant. Ask me about housing, insurance, school continuity, or financial next steps. While the model is still being integrated, this interface is running with placeholder responses.'
+  }
+];
+
+export default function Chatbot({ userProfile }) {
+  const [messages, setMessages] = useState(initialMessages);
+  const [input, setInput] = useState('');
+  const [isTyping, setIsTyping] = useState(false);
+  const [conversationId, setConversationId] = useState(null);
+  const userPhotoUrl = userProfile?.photoURL || null;
+  const userId = userProfile?.uid || null;
+
+  const displayName = useMemo(() => {
+    if (userProfile?.name) return userProfile.name;
+    if (userProfile?.displayName) return userProfile.displayName;
+    return 'there';
+  }, [userProfile]);
+
+  const sendMessage = async (text) => {
+    const content = text.trim();
+    if (!content || isTyping) return;
+
+    const userMessage = {
+      id: `user-${Date.now()}`,
+      role: 'user',
+      content
+    };
+
+    setMessages((prev) => [...prev, userMessage]);
+    setInput('');
+    setIsTyping(true);
+
+    if (!userId) {
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: `assistant-${Date.now()}`,
+          role: 'assistant',
+          content: 'Unable to send message because your user profile is not loaded yet. Please refresh and try again.'
+        }
+      ]);
+      setIsTyping(false);
+      return;
+    }
+
+    try {
+      const response = await sendChatMessage({
+        userId,
+        message: content,
+        conversationId,
+        context: {
+          profile: {
+            name: userProfile?.name || userProfile?.displayName || null,
+            hasChildren: Boolean(userProfile?.hasChildren),
+            needsHousing: Boolean(userProfile?.needsHousing),
+            needsEmployment: Boolean(userProfile?.needsEmployment),
+            hasInsurance: Boolean(userProfile?.hasInsurance),
+            insuranceType: userProfile?.insuranceType || null,
+            insuranceClaimStatus: userProfile?.insuranceClaimStatus || null,
+            caregivingNeeds: userProfile?.caregivingNeeds || []
+          }
+        }
+      });
+
+      if (response?.conversationId) {
+        setConversationId(response.conversationId);
+      }
+
+      const replyContent = response?.reply?.content;
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: response?.reply?.id || `assistant-${Date.now()}`,
+          role: 'assistant',
+          content:
+            replyContent ||
+            'Placeholder response: your model endpoint is not connected yet. Next we can wire this to your backend AI route and return grounded recommendations based on intake profile, insurance context, and local resource data.'
+        }
+      ]);
+    } catch (error) {
+      console.error('Error sending chat message:', error);
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: `assistant-error-${Date.now()}`,
+          role: 'assistant',
+          content: 'I could not reach the chat service. Please check that the backend is running and try again.'
+        }
+      ]);
+    } finally {
+      setIsTyping(false);
+    }
+  };
+
+  return (
+    <Layout userProfile={userProfile}>
+      <div className="max-w-5xl mx-auto space-y-6">
+        <div className="bg-linear-to-r from-emerald-600 to-cyan-600 rounded-2xl shadow-lg p-8 text-white">
+          <div className="flex items-center space-x-3 mb-2">
+            <Sparkles className="w-7 h-7" />
+            <h1 className="text-3xl font-bold">AI Recovery Assistant</h1>
+          </div>
+          <p className="text-emerald-50 text-lg">
+            Welcome, {displayName}. This interface is ready for model integration and supports the full recovery workflow.
+          </p>
+        </div>
+
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          <section className="lg:col-span-1 bg-white rounded-xl shadow-sm border border-gray-100 p-5">
+            <h2 className="font-semibold text-gray-900 flex items-center space-x-2 mb-4">
+              <Lightbulb className="w-5 h-5 text-amber-500" />
+              <span>Try These Prompts</span>
+            </h2>
+            <div className="space-y-3">
+              {starterPrompts.map((prompt) => (
+                <button
+                  key={prompt}
+                  onClick={() => sendMessage(prompt)}
+                  className="w-full text-left p-3 rounded-lg border border-gray-200 text-sm text-gray-700 hover:bg-emerald-50 hover:border-emerald-300 transition-colors"
+                >
+                  {prompt}
+                </button>
+              ))}
+            </div>
+            <div className="mt-5 p-3 bg-amber-50 border border-amber-200 rounded-lg">
+              <p className="text-xs text-amber-800">
+                Current mode: UI placeholder. Responses are mocked while model development is in progress.
+              </p>
+            </div>
+          </section>
+
+          <section className="lg:col-span-2 bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+            <div className="h-[58vh] min-h-105 flex flex-col">
+              <div className="flex-1 overflow-y-auto p-5 space-y-4 bg-linear-to-b from-white to-emerald-50/40">
+                {messages.map((message) => {
+                  const isAssistant = message.role === 'assistant';
+                  return (
+                    <div
+                      key={message.id}
+                      className={`flex items-start gap-3 ${isAssistant ? '' : 'justify-end'}`}
+                    >
+                      {isAssistant && (
+                        <div className="w-8 h-8 rounded-full bg-emerald-600 text-white flex items-center justify-center shrink-0">
+                          <Bot className="w-4 h-4" />
+                        </div>
+                      )}
+                      <div
+                        className={`max-w-[85%] p-3 rounded-xl text-sm leading-relaxed ${
+                          isAssistant
+                            ? 'bg-white border border-gray-200 text-gray-800'
+                            : 'bg-emerald-600 text-white'
+                        }`}
+                      >
+                        {message.content}
+                      </div>
+                      {!isAssistant && (
+                        <div className="w-8 h-8 rounded-full bg-gray-700 text-white flex items-center justify-center shrink-0 overflow-hidden">
+                          {userPhotoUrl ? (
+                            <img
+                              src={userPhotoUrl}
+                              alt="Your profile"
+                              className="w-full h-full object-cover"
+                              referrerPolicy="no-referrer"
+                            />
+                          ) : (
+                            <User className="w-4 h-4" />
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+
+                {isTyping && (
+                  <div className="flex items-start gap-3">
+                    <div className="w-8 h-8 rounded-full bg-emerald-600 text-white flex items-center justify-center shrink-0">
+                      <Bot className="w-4 h-4" />
+                    </div>
+                    <div className="bg-white border border-gray-200 rounded-xl p-3 text-sm text-gray-500">
+                      Assistant is typing...
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <div className="border-t border-gray-200 p-4 bg-white">
+                <form
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    sendMessage(input);
+                  }}
+                  className="flex items-center gap-3"
+                >
+                  <input
+                    value={input}
+                    onChange={(e) => setInput(e.target.value)}
+                    placeholder="Ask about housing, insurance, school transitions, or recovery timelines..."
+                    className="flex-1 px-4 py-3 rounded-xl border border-gray-300 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                  />
+                  <button
+                    type="submit"
+                    disabled={!input.trim() || isTyping}
+                    className="px-4 py-3 rounded-xl bg-emerald-600 text-white hover:bg-emerald-700 disabled:bg-gray-300 disabled:text-gray-500 transition-colors flex items-center gap-2"
+                  >
+                    <Send className="w-4 h-4" />
+                    <span>Send</span>
+                  </button>
+                </form>
+              </div>
+            </div>
+          </section>
+        </div>
+      </div>
+    </Layout>
+  );
+}
