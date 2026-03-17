@@ -8,14 +8,15 @@ import sys
 from pathlib import Path
 import pandas as pd
 
-DEMO_MAX_ROWS_PER_FILE = 2000
+# Load .env before reading config
+import config  # noqa: F401
 
-# Your Pinecone API key (set via: export PINECONE_API_KEY="your_key")
-PINECONE_API_KEY = os.environ.get("PINECONE_API_KEY", "")
-INDEX_NAME = "wildfire-narratives"   # name of your Pinecone index
-JINA_MODEL = "jinaai/jina-embeddings-v3"  # embedding model from HuggingFace
-DIMENSION = 1024   # vector size that Jina outputs (must match Pinecone index setting)
-TOP_K = 3          # number of search results to return
+DEMO_MAX_ROWS_PER_FILE = 2000
+PINECONE_API_KEY = config.PINECONE_API_KEY
+INDEX_NAME = config.INDEX_NAME
+JINA_MODEL = config.JINA_MODEL
+DIMENSION = config.DIMENSION
+TOP_K = config.TOP_K
 
 
 # STAGE 1: Load all CSV files from ./data into one big dataframe
@@ -191,7 +192,7 @@ def load_embedding_model():
 def get_pinecone_index():
     if not PINECONE_API_KEY:
         print("ERROR: PINECONE_API_KEY not set.")
-        print("Run: export PINECONE_API_KEY='your_key_here'")
+        print("Add to .env or run: export PINECONE_API_KEY='your_key_here'")
         sys.exit(1)
 
     from pinecone import Pinecone, ServerlessSpec
@@ -291,28 +292,28 @@ def interactive_loop(model, index):
             print("  - high disruption with evacuation orders")
             continue
 
-        docs = search(model, index, query)
-
-        # Groq RAG — uncomment this block when you have a GROQ_API_KEY
-        # It takes the search results above and uses an LLM to answer your question
-        # from groq import Groq
-        # groq_client = Groq(api_key=os.environ["GROQ_API_KEY"])
-        # context = "\n\n".join(docs)
-        # response = groq_client.chat.completions.create(
-        #     model="llama3-8b-8192",
-        #     messages=[
-        #         {"role": "system", "content": "You are a wildfire recovery assistant. Use only the context below to answer."},
-        #         {"role": "user", "content": f"Context:\n{context}\n\nQuestion: {query}"},
-        #     ]
-        # )
-        # print("\n💬 RAG Answer:", response.choices[0].message.content)
+        # If GROQ_API_KEY is set, answer using retrieved context via chatbot module
+        if config.GROQ_API_KEY:
+            from chatbot import rag_response, get_groq_client
+            groq_client = get_groq_client()
+            print("\n💬 RAG Answer: ", end="", flush=True)
+            print(rag_response(query, model, index, groq_client, silent=False))
+        else:
+            search(model, index, query)
+            print("(Set GROQ_API_KEY in .env for RAG answers. Run with --chat for full chatbot.)")
 
 
 def main():
-    # --rebuild flag forces re-embedding even if Pinecone already has vectors
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(description="Wildfire recovery: load data, embed, upload to Pinecone, search or chat.")
     parser.add_argument("--rebuild", action="store_true", help="Force re-embed and re-upload to Pinecone")
+    parser.add_argument("--chat", action="store_true", help="Run Groq RAG chatbot (skip data load; use existing Pinecone index)")
     args = parser.parse_args()
+
+    # --chat: run chatbot only (no data pipeline)
+    if args.chat:
+        from chatbot import main as chatbot_main
+        chatbot_main()
+        return
 
     print("=" * 60)
     print("STAGE 1: Loading CSV files from ./data")

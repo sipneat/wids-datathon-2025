@@ -3,29 +3,15 @@
 Tests that Pinecone has vectors and that search is working correctly.
 """
 
-import os
 import sys
+from pathlib import Path
 
-PINECONE_API_KEY = os.environ.get("PINECONE_API_KEY", "")
-INDEX_NAME = "wildfire-narratives"
-JINA_MODEL = "jinaai/jina-embeddings-v3"
+_EMBED_DIR = Path(__file__).resolve().parent
+if str(_EMBED_DIR) not in sys.path:
+    sys.path.insert(0, str(_EMBED_DIR))
 
-
-def get_index():
-    if not PINECONE_API_KEY:
-        print("ERROR: PINECONE_API_KEY not set. Run: export PINECONE_API_KEY='your_key'")
-        sys.exit(1)
-    from pinecone import Pinecone
-    pc = Pinecone(api_key=PINECONE_API_KEY)
-    return pc.Index(INDEX_NAME)
-
-
-def load_model():
-    print("Loading Jina model...")
-    from sentence_transformers import SentenceTransformer
-    model = SentenceTransformer(JINA_MODEL, trust_remote_code=True)
-    print("Model loaded.\n")
-    return model
+import config  # noqa: E402
+from data import load_embedding_model, get_pinecone_index  # noqa: E402
 
 
 def run_tests(model, index):
@@ -40,7 +26,7 @@ def run_tests(model, index):
         print(f"  PASS — {count} vectors found in Pinecone\n")
         passed += 1
     else:
-        print("  FAIL — No vectors found. Run wildfire_recovery_demo.py --rebuild\n")
+        print("  FAIL — No vectors found. Run data.py --rebuild\n")
         failed += 1
         return  # no point running other tests
 
@@ -109,8 +95,8 @@ def main():
     print("Pinecone + Jina Integration Tests")
     print("=" * 60 + "\n")
 
-    index = get_index()
-    model = load_model()
+    index = get_pinecone_index()
+    model = load_embedding_model()
     run_tests(model, index)
 
 

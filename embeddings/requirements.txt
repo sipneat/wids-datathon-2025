@@ -1,0 +1,7 @@
+# Wildfire recovery embeddings + RAG chatbot
+pandas>=2.0
+numpy>=1.24
+pinecone-client>=5.0
+sentence-transformers>=3.0
+groq>=0.4.0
+python-dotenv>=1.0.0
