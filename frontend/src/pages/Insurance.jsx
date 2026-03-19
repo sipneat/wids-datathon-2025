@@ -1,7 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { Layout } from '../components/Layout';
 import { Upload, AlertCircle, Clock, Home, DollarSign, FileText, Trash2 } from 'lucide-react';
-import insuranceStorageService from '../services/insuranceStorageService';
 
 export default function Insurance({ userProfile }) {
   const [uploadedFile, setUploadedFile] = useState(null);
@@ -14,7 +13,7 @@ export default function Insurance({ userProfile }) {
     const loadDocuments = async () => {
       try {
         const docs = await insuranceStorageService.getUserDocuments(
-          userProfile?.name || localStorage.getItem('userId') || 'anonymous'
+          userProfile?.uid || userProfile?.email || userProfile?.name || 'anonymous'
         );
         setStoredDocuments(docs);
       } catch (err) {
@@ -38,7 +37,7 @@ export default function Insurance({ userProfile }) {
     setError(null);
 
     try {
-      const userId = userProfile?.name || localStorage.getItem('userId') || 'anonymous';
+      const userId = userProfile?.uid || userProfile?.email || userProfile?.name || 'anonymous';
       const docMetadata = await insuranceStorageService.saveDocument(file, userId);
       
       setUploadedFile(docMetadata);
@@ -72,7 +71,7 @@ export default function Insurance({ userProfile }) {
     <Layout userProfile={userProfile}>
       <div className="max-w-4xl mx-auto space-y-8">
         {/* Header */}
-        <div className="bg-gradient-to-r from-blue-600 to-green-600 rounded-2xl shadow-lg p-8 text-white">
+        <div className="bg-linear-to-r from-blue-600 to-green-600 rounded-2xl shadow-lg p-8 text-white">
           <h1 className="text-3xl font-bold mb-2">Insurance Guidance</h1>
           <p className="text-blue-50 text-lg">
             {userProfile?.hasInsurance
@@ -85,9 +84,9 @@ export default function Insurance({ userProfile }) {
         {!userProfile?.hasInsurance && (
           <>
             {/* Urgent Help Section */}
-            <div className="bg-gradient-to-r from-red-50 to-orange-50 rounded-xl shadow-sm p-8 border border-red-200">
+            <div className="bg-linear-to-r from-red-50 to-orange-50 rounded-xl shadow-sm p-8 border border-red-200">
               <div className="flex items-start space-x-4">
-                <AlertCircle className="w-8 h-8 text-red-600 flex-shrink-0 mt-1" />
+                <AlertCircle className="w-8 h-8 text-red-600 shrink-0 mt-1" />
                 <div>
                   <h2 className="text-2xl font-semibold text-red-900 mb-3">You Don't Have Insurance Coverage</h2>
                   <p className="text-red-800 mb-4">
@@ -446,9 +445,9 @@ export default function Insurance({ userProfile }) {
 
         {/* AI Parsing Stub - Only show if insured */}
         {userProfile?.hasInsurance && (
-        <div className="bg-gradient-to-r from-purple-50 to-pink-50 rounded-xl shadow-sm p-8 border border-purple-200">
+        <div className="bg-linear-to-r from-purple-50 to-pink-50 rounded-xl shadow-sm p-8 border border-purple-200">
           <div className="flex items-start space-x-4">
-            <AlertCircle className="w-6 h-6 text-purple-600 flex-shrink-0 mt-1" />
+            <AlertCircle className="w-6 h-6 text-purple-600 shrink-0 mt-1" />
             <div>
               <h3 className="text-lg font-semibold text-purple-900 mb-2">AI Policy Parsing (Coming Soon)</h3>
               <p className="text-purple-800 mb-3">

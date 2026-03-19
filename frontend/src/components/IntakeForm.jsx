@@ -1,9 +1,8 @@
-import React, { useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { ChevronRight, ChevronLeft, Check } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { auth } from '../services/firebase';
-
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:3000/api';
+import { submitIntake } from '../services/routes';
 
 export const IntakeForm = ({ onComplete }) => {
   const [currentStep, setCurrentStep] = useState(0);
@@ -157,30 +156,9 @@ export const IntakeForm = ({ onComplete }) => {
     }, 500);
   };
 
-  // Advance logic that can use a provided responses object
-  const advanceWithResponses = async (resp) => {
-    if (currentStep < visibleQuestions.length - 1) {
-      setCurrentStep(currentStep + 1);
-      setAiResponse('');
-    } else {
-      const profile = generateUserProfile(resp);
-      const formattedResponses = Object.entries(resp).map(([questionId, answer]) => ({ question_id: questionId, answer }));
-      await postResponsesToBackend(formattedResponses, profile);
-      localStorage.setItem('intakeResponses', JSON.stringify(resp));
-      const user = auth.currentUser;
-      if (user) {
-        localStorage.setItem('userId', user.uid);
-      }
-      onComplete(profile);
-      navigate('/dashboard');
-    }
-  };
-
-  // Allow Enter to move to next; Shift+Enter keeps newline in textarea
   useEffect(() => {
     const onKeyDown = (e) => {
       if (e.key !== 'Enter') return;
-      // If textarea and Shift pressed, allow newline
       if (currentQuestion?.type === 'textarea' && e.shiftKey) return;
       if (!canProceed()) return;
       e.preventDefault();
@@ -190,49 +168,32 @@ export const IntakeForm = ({ onComplete }) => {
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [currentQuestion, responses, currentStep]);
 
-  // When selecting a radio option, auto-advance to next question
   const handleRadioSelect = (option) => {
-    const nextResponses = { ...responses, [currentQuestion.id]: option };
     handleAnswer(option);
-    setTimeout(() => {
-      advanceWithResponses(nextResponses);
-    }, 150);
   };
 
-  const postResponsesToBackend = async (formattedResponses, userProfile) => {
+  const postResponsesToBackend = async (answers, userProfile) => {
     try {
       const user = auth.currentUser;
       if (!user) {
         console.error('No authenticated user found');
         throw new Error('User must be logged in');
       }
-
-      const idToken = await user.getIdToken();
       
       const payload = {
         userId: user.uid,
         email: user.email,
         displayName: user.displayName,
         photoURL: user.photoURL,
-        responses: responses,
+        responses: answers,
         profile: userProfile,
         submittedAt: new Date().toISOString()
       };
-      
-      const response = await fetch(`${API_BASE_URL}/intake/submit`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${idToken}`
-        },
-        body: JSON.stringify(payload)
+
+      const data = await submitIntake({
+        userId: user.uid,
+        payload
       });
-      
-      if (!response.ok) {
-        throw new Error(`Backend response status: ${response.status}`);
-      }
-      
-      const data = await response.json();
       console.log('Intake responses saved via backend:', data);
       return data;
     } catch (error) {
@@ -261,16 +222,8 @@ export const IntakeForm = ({ onComplete }) => {
       // Complete intake and generate user profile
       const profile = generateUserProfile(responses);
       
-      // Format and send responses to Firebase
-      const formattedResponses = formatResponsesForBackend();
-      await postResponsesToBackend(formattedResponses, profile);
-      
-      // Save to localStorage and proceed
-      localStorage.setItem('intakeResponses', JSON.stringify(responses));
-      const user = auth.currentUser;
-      if (user) {
-        localStorage.setItem('userId', user.uid);
-      }
+      // Send responses to backend and proceed
+      await postResponsesToBackend(responses, profile);
       
       onComplete(profile);
       navigate('/dashboard');
@@ -321,10 +274,10 @@ export const IntakeForm = ({ onComplete }) => {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 via-green-50 to-blue-50 flex items-center justify-center p-4">
+    <div className="min-h-screen bg-linear-to-br from-blue-50 via-green-50 to-blue-50 flex items-center justify-center p-4">
       <div className="max-w-2xl w-full bg-white rounded-2xl shadow-xl overflow-hidden">
         {/* Header */}
-        <div className="bg-gradient-to-r from-green-600 to-blue-600 p-6 text-white">
+        <div className="bg-linear-to-r from-green-600 to-blue-600 p-6 text-white">
           <h2 className="text-2xl font-semibold">Recovery Intake Assessment</h2>
           <p className="text-green-50 text-sm mt-2">
             Help us understand your needs so we can provide personalized support

@@ -1,4 +1,3 @@
-import React from 'react';
 import { Calendar, TrendingUp, DollarSign, School } from 'lucide-react';
 import { ResourceCard } from '../components/ResourceCard';
 import { Layout } from '../components/Layout';
@@ -116,7 +115,7 @@ export default function Resources({ userProfile }) {
         </div>
 
         {/* Additional Resources */}
-        <div className="bg-gradient-to-r from-green-50 to-blue-50 rounded-xl p-6 border border-green-100">
+        <div className="bg-linear-to-r from-green-50 to-blue-50 rounded-xl p-6 border border-green-100">
           <h3 className="text-lg font-semibold text-gray-800 mb-4">Important Updates</h3>
           <div className="space-y-3">
             <div className="bg-white rounded-lg p-4">

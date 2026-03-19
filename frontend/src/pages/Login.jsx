@@ -1,11 +1,9 @@
-import React, { useState } from 'react';
-import { Home, LogIn } from 'lucide-react';
+import { useState } from 'react';
+import { Home } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { signInWithGoogle } from '../services/firebase';
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:3000/api';
-
-export default function Login({ onLogin }) {
+export default function Login() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const navigate = useNavigate();
@@ -15,27 +13,9 @@ export default function Login({ onLogin }) {
     setError('');
     
     try {
-      const user = await signInWithGoogle();
-      const idToken = await user.getIdToken();
-      
-      // Check if user has completed intake via backend
-      const response = await fetch(`${API_BASE_URL}/user/profile/${user.uid}`, {
-        headers: {
-          'Authorization': `Bearer ${idToken}`
-        }
-      });
-      
-      if (response.ok) {
-        const profile = await response.json();
-        // Existing user with profile - go to dashboard
-        onLogin({ ...profile, uid: user.uid, email: user.email });
-        navigate('/dashboard');
-      } else if (response.status === 404) {
-        // New user - redirect to intake form
-        navigate('/intake');
-      } else {
-        throw new Error('Failed to fetch user profile');
-      }
+      await signInWithGoogle();
+      // App-level auth listener controls route after profile lookup.
+      navigate('/');
     } catch (error) {
       console.error('Error signing in:', error);
       setError('Failed to sign in with Google. Please try again.');
@@ -45,10 +25,10 @@ export default function Login({ onLogin }) {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 via-green-50 to-blue-50 flex items-center justify-center p-4">
+    <div className="min-h-screen bg-linear-to-br from-blue-50 via-green-50 to-blue-50 flex items-center justify-center p-4">
       <div className="max-w-md w-full bg-white rounded-2xl shadow-xl overflow-hidden">
         {/* Header */}
-        <div className="bg-gradient-to-r from-green-600 to-blue-600 p-8 text-white text-center">
+        <div className="bg-linear-to-r from-green-600 to-blue-600 p-8 text-white text-center">
           <div className="flex justify-center mb-4">
             <div className="w-16 h-16 bg-white/20 rounded-full flex items-center justify-center">
               <Home className="w-8 h-8" />

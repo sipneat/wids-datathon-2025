@@ -1,88 +1,11 @@
-import React, { useEffect, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Layout } from '../components/Layout';
-import { Home as HomeIcon, School, Baby, DollarSign, MapPin, Briefcase, CheckCircle, AlertCircle, Loader2 } from 'lucide-react';
+import { Home as HomeIcon, School, Baby, DollarSign, MapPin, Briefcase, CheckCircle, AlertCircle } from 'lucide-react';
 import { Link } from 'react-router-dom';
-import { getUserProfile, getUserIntakeResponses, getUserActions, updateActionStatus } from '../services/firebase';
-import { auth } from '../services/firebase';
 
 export default function Dashboard({ userProfile: initialUserProfile }) {
-  const [intakeResponses, setIntakeResponses] = useState([]);
-  const [userProfile, setUserProfile] = useState(initialUserProfile);
+  const userProfile = useMemo(() => initialUserProfile || null, [initialUserProfile]);
   const [actionStatuses, setActionStatuses] = useState({});
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
-
-  useEffect(() => {
-    const loadUserData = async () => {
-      try {
-        setLoading(true);
-        const user = auth.currentUser;
-        
-        if (!user) {
-          console.log('No authenticated user');
-          setLoading(false);
-          return;
-        }
-
-        // Fetch user profile from Firestore
-        try {
-          const profile = await getUserProfile(user.uid);
-          setUserProfile(profile);
-        } catch (profileError) {
-          console.error('Error loading profile:', profileError);
-          // Fall back to initial profile if available
-          if (initialUserProfile) {
-            setUserProfile(initialUserProfile);
-          }
-        }
-
-        // Fetch intake responses from Firestore
-        try {
-          const intakeData = await getUserIntakeResponses(user.uid);
-          if (intakeData.responses) {
-            const responsesArray = Object.entries(intakeData.responses).map(([key, value]) => ({
-              question_id: key,
-              answer: value
-            }));
-            setIntakeResponses(responsesArray);
-          }
-        } catch (intakeError) {
-          console.error('Error loading intake responses:', intakeError);
-          // Fall back to localStorage if Firestore fails
-          const savedResponses = localStorage.getItem('intakeResponses');
-          if (savedResponses) {
-            try {
-              const parsed = JSON.parse(savedResponses);
-              setIntakeResponses(Object.entries(parsed).map(([key, value]) => ({
-                question_id: key,
-                answer: value
-              })));
-            } catch (error) {
-              console.error('Error parsing saved responses:', error);
-            }
-          }
-        }
-
-        // Fetch user action statuses
-        try {
-          const actionsData = await getUserActions(user.uid);
-          if (actionsData.actions) {
-            setActionStatuses(actionsData.actions);
-          }
-        } catch (actionsError) {
-          console.error('Error loading action statuses:', actionsError);
-        }
-
-        setLoading(false);
-      } catch (err) {
-        console.error('Error loading dashboard data:', err);
-        setError('Failed to load dashboard data. Please try refreshing the page.');
-        setLoading(false);
-      }
-    };
-
-    loadUserData();
-  }, [initialUserProfile]);
 
   const getWelcomeMessage = () => {
     const hour = new Date().getHours();
@@ -92,9 +15,6 @@ export default function Dashboard({ userProfile: initialUserProfile }) {
   };
 
   const handleActionClick = async (actionId, currentStatus) => {
-    const user = auth.currentUser;
-    if (!user) return;
-
     // Cycle through statuses: not-started -> in-progress -> completed
     const statusFlow = {
       'not-started': 'in-progress',
@@ -104,20 +24,15 @@ export default function Dashboard({ userProfile: initialUserProfile }) {
 
     const newStatus = statusFlow[currentStatus || 'not-started'];
 
-    try {
-      await updateActionStatus(user.uid, actionId, newStatus);
-      setActionStatuses(prev => ({
-        ...prev,
-        [actionId]: {
-          ...prev[actionId],
-          actionId,
-          status: newStatus,
-          updatedAt: new Date().toISOString()
-        }
-      }));
-    } catch (error) {
-      console.error('Error updating action status:', error);
-    }
+    setActionStatuses(prev => ({
+      ...prev,
+      [actionId]: {
+        ...prev[actionId],
+        actionId,
+        status: newStatus,
+        updatedAt: new Date().toISOString()
+      }
+    }));
   };
 
   const getActionStatus = (actionId) => {
@@ -167,37 +82,11 @@ export default function Dashboard({ userProfile: initialUserProfile }) {
     }
   ].filter(Boolean);
 
-  if (loading) {
-    return (
-      <Layout userProfile={userProfile}>
-        <div className="max-w-6xl mx-auto flex items-center justify-center h-96">
-          <div className="text-center">
-            <Loader2 className="w-12 h-12 text-green-600 animate-spin mx-auto mb-4" />
-            <p className="text-gray-600">Loading your dashboard...</p>
-          </div>
-        </div>
-      </Layout>
-    );
-  }
-
-  if (error) {
-    return (
-      <Layout userProfile={userProfile}>
-        <div className="max-w-6xl mx-auto">
-          <div className="bg-red-50 border border-red-200 rounded-xl p-6 text-center">
-            <AlertCircle className="w-12 h-12 text-red-600 mx-auto mb-4" />
-            <p className="text-red-800">{error}</p>
-          </div>
-        </div>
-      </Layout>
-    );
-  }
-
   return (
     <Layout userProfile={userProfile}>
       <div className="max-w-6xl mx-auto space-y-8">
         {/* Welcome Section */}
-        <div className="bg-gradient-to-r from-green-600 to-blue-600 rounded-2xl shadow-lg p-8 text-white">
+        <div className="bg-linear-to-r from-green-600 to-blue-600 rounded-2xl shadow-lg p-8 text-white">
           <h1 className="text-3xl font-bold mb-2">
             {getWelcomeMessage()}, {userProfile?.name || userProfile?.displayName || 'there'}
           </h1>
@@ -351,24 +240,6 @@ export default function Dashboard({ userProfile: initialUserProfile }) {
           </div>
         </div>
 
-        {/* Saved Intake Responses */}
-        {intakeResponses.length > 0 && (
-          <div className="bg-white rounded-xl shadow-sm p-6 border-l-4 border-blue-500">
-            <h2 className="text-2xl font-semibold text-gray-800 mb-4">Your Intake Responses</h2>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {intakeResponses.map((response, index) => (
-                <div key={index} className="p-4 bg-gray-50 rounded-lg border border-gray-200">
-                  <p className="text-sm font-semibold text-gray-600 uppercase tracking-wide mb-2">
-                    {response.question_id.replace(/([A-Z])/g, ' $1').trim()}
-                  </p>
-                  <p className="text-gray-800">
-                    {Array.isArray(response.answer) ? response.answer.join(', ') : String(response.answer)}
-                  </p>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
       </div>
     </Layout>
   );
