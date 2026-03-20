@@ -1,1 +1,95 @@
 @import "tailwindcss";
+
+.dashboard-shell {
+	max-width: 72rem;
+	margin: 0 auto;
+	display: flex;
+	flex-direction: column;
+	gap: 2rem;
+}
+
+.dashboard-card {
+	background: #ffffff;
+	border-radius: 0.75rem;
+	box-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+	padding: 1.5rem;
+}
+
+.dashboard-stat-card {
+	background: #ffffff;
+	border-radius: 0.75rem;
+	box-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+	padding: 1.5rem;
+	border: 1px solid #f3f4f6;
+}
+
+.dashboard-card-title {
+	color: #1f2937;
+	font-size: 1.5rem;
+	line-height: 2rem;
+	font-weight: 600;
+}
+
+.dashboard-card-subtitle {
+	color: #4b5563;
+}
+
+.dashboard-resource-item {
+	display: flex;
+	align-items: center;
+	gap: 0.75rem;
+	padding: 1rem;
+	background: #f0fdf4;
+	border-radius: 0.5rem;
+}
+
+.dashboard-intake-item {
+	padding: 1rem;
+	border: 1px solid #e5e7eb;
+	border-radius: 0.5rem;
+}
+
+.dashboard-input {
+	width: 100%;
+	border-radius: 0.5rem;
+	border: 1px solid #d1d5db;
+	padding: 0.5rem 0.75rem;
+}
+
+.dashboard-btn {
+	padding: 0.5rem 1rem;
+	border-radius: 0.5rem;
+	transition: background-color 0.2s ease;
+}
+
+.dashboard-btn:disabled {
+	opacity: 0.7;
+	cursor: not-allowed;
+}
+
+.dashboard-btn-primary {
+	background: #2563eb;
+	color: #ffffff;
+}
+
+.dashboard-btn-primary:hover {
+	background: #1d4ed8;
+}
+
+.dashboard-btn-neutral {
+	background: #e5e7eb;
+	color: #1f2937;
+}
+
+.dashboard-btn-neutral:hover {
+	background: #d1d5db;
+}
+
+.dashboard-btn-success {
+	background: #16a34a;
+	color: #ffffff;
+}
+
+.dashboard-btn-success:hover {
+	background: #15803d;
+}

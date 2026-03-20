@@ -1,11 +1,106 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Layout } from '../components/Layout';
 import { Home as HomeIcon, School, Baby, DollarSign, MapPin, Briefcase, CheckCircle, AlertCircle } from 'lucide-react';
 import { Link } from 'react-router-dom';
+import { auth } from '../services/firebase';
+import { getUserIntake, submitIntake } from '../services/routes';
+import { INTAKE_QUESTIONS, buildProfileFromResponses } from '../shared/intakeConfig';
 
 export default function Dashboard({ userProfile: initialUserProfile }) {
-  const userProfile = useMemo(() => initialUserProfile || null, [initialUserProfile]);
+  const initialProfile = useMemo(() => initialUserProfile || {}, [initialUserProfile]);
   const [actionStatuses, setActionStatuses] = useState({});
+  const [intakeResponses, setIntakeResponses] = useState(null);
+  const [draftResponses, setDraftResponses] = useState({});
+  const [isEditingIntake, setIsEditingIntake] = useState(false);
+  const [isSavingIntake, setIsSavingIntake] = useState(false);
+  const [isLoadingIntake, setIsLoadingIntake] = useState(true);
+  const [intakeError, setIntakeError] = useState('');
+
+  const intakeQuestions = INTAKE_QUESTIONS;
+
+  const derivedProfile = useMemo(() => buildProfileFromResponses(draftResponses), [draftResponses]);
+  const userProfile = useMemo(() => ({ ...initialProfile, ...derivedProfile }), [initialProfile, derivedProfile]);
+
+  useEffect(() => {
+    const loadIntake = async () => {
+      setIsLoadingIntake(true);
+      setIntakeError('');
+      try {
+        const user = auth.currentUser;
+        if (!user) {
+          setIntakeResponses({});
+          setDraftResponses({});
+          return;
+        }
+
+        const data = await getUserIntake(user.uid);
+        const responses = data?.responses || {};
+        setIntakeResponses(responses);
+        setDraftResponses(responses);
+      } catch (error) {
+        console.error('Error loading intake responses:', error);
+        setIntakeError('Unable to load intake answers right now.');
+      } finally {
+        setIsLoadingIntake(false);
+      }
+    };
+
+    loadIntake();
+  }, []);
+
+  const visibleIntakeQuestions = intakeQuestions.filter((q) => !q.showIf || q.showIf(draftResponses));
+
+  const renderAnswer = (value) => {
+    if (value == null || value === '') return 'Not answered';
+    if (Array.isArray(value)) return value.length ? value.join(', ') : 'Not answered';
+    return String(value);
+  };
+
+  const handleDraftChange = (question, value) => {
+    setDraftResponses((prev) => ({
+      ...prev,
+      [question.id]: value
+    }));
+  };
+
+  const handleSaveIntake = async () => {
+    try {
+      setIsSavingIntake(true);
+      const user = auth.currentUser;
+      if (!user) {
+        setIntakeError('Please log in again to save updates.');
+        return;
+      }
+
+      await submitIntake({
+        userId: user.uid,
+        payload: {
+          userId: user.uid,
+          email: user.email,
+          displayName: user.displayName,
+          photoURL: user.photoURL,
+          responses: draftResponses,
+          profile: userProfile,
+          submittedAt: new Date().toISOString()
+        }
+      });
+
+      setIntakeResponses(draftResponses);
+      setIsEditingIntake(false);
+      setIntakeError('');
+    } catch (error) {
+      console.error('Error saving intake updates:', error);
+      setIntakeError('Unable to save your updated answers.');
+    } finally {
+      setIsSavingIntake(false);
+    }
+  };
+
+  const handleCancelIntakeEdit = () => {
+    setDraftResponses(intakeResponses || {});
+    setIsEditingIntake(false);
+    setIntakeError('');
+  };
 
   const getWelcomeMessage = () => {
     const hour = new Date().getHours();
@@ -84,7 +179,7 @@ export default function Dashboard({ userProfile: initialUserProfile }) {
 
   return (
     <Layout userProfile={userProfile}>
-      <div className="max-w-6xl mx-auto space-y-8">
+      <div className="dashboard-shell">
         {/* Welcome Section */}
         <div className="bg-linear-to-r from-green-600 to-blue-600 rounded-2xl shadow-lg p-8 text-white">
           <h1 className="text-3xl font-bold mb-2">
@@ -97,18 +192,18 @@ export default function Dashboard({ userProfile: initialUserProfile }) {
 
         {/* Quick Stats */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-          <div className="bg-white rounded-xl shadow-sm p-6 border border-gray-100">
+          <div className="dashboard-stat-card">
             <div className="flex items-center space-x-3 mb-2">
               <HomeIcon className="w-6 h-6 text-green-600" />
               <h3 className="font-semibold text-gray-800">Household Size</h3>
             </div>
             <p className="text-3xl font-bold text-gray-900">{userProfile?.familySize || 1}</p>
             <p className="text-sm text-gray-600 mt-1">
-              {userProfile?.hasChildren ? `Including ${userProfile?.childrenAges?.split(',').length || 0} children` : 'Adults only'}
+              {userProfile?.hasChildren ? 'Including children' : 'Adults only'}
             </p>
           </div>
 
-          <div className="bg-white rounded-xl shadow-sm p-6 border border-gray-100">
+          <div className="dashboard-stat-card">
             <div className="flex items-center space-x-3 mb-2">
               <AlertCircle className="w-6 h-6 text-blue-600" />
               <h3 className="font-semibold text-gray-800">Priority Actions</h3>
@@ -117,7 +212,7 @@ export default function Dashboard({ userProfile: initialUserProfile }) {
             <p className="text-sm text-gray-600 mt-1">Items need attention</p>
           </div>
 
-          <div className="bg-white rounded-xl shadow-sm p-6 border border-gray-100">
+          <div className="dashboard-stat-card">
             <div className="flex items-center space-x-3 mb-2">
               <DollarSign className="w-6 h-6 text-purple-600" />
               <h3 className="font-semibold text-gray-800">Insurance Status</h3>
@@ -130,8 +225,8 @@ export default function Dashboard({ userProfile: initialUserProfile }) {
         </div>
 
         {/* Priority Actions */}
-        <div className="bg-white rounded-xl shadow-sm p-6">
-          <h2 className="text-2xl font-semibold text-gray-800 mb-6">Your Priority Actions</h2>
+        <div className="dashboard-card">
+          <h2 className="dashboard-card-title mb-6">Your Priority Actions</h2>
           <div className="space-y-4">
             {priorityActions.map((action, index) => {
               const Icon = action.icon;
@@ -199,45 +294,172 @@ export default function Dashboard({ userProfile: initialUserProfile }) {
         </div>
 
         {/* Your Support Resources */}
-        <div className="bg-white rounded-xl shadow-sm p-6">
-          <h2 className="text-2xl font-semibold text-gray-800 mb-4">Personalized Resources</h2>
-          <p className="text-gray-600 mb-6">
+        <div className="dashboard-card">
+          <h2 className="dashboard-card-title mb-4">Personalized Resources</h2>
+          <p className="dashboard-card-subtitle mb-6">
             Based on your intake assessment, here are the support areas we've activated for you:
           </p>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {userProfile?.needsHousing && (
-              <div className="flex items-center space-x-3 p-4 bg-green-50 rounded-lg">
+              <div className="dashboard-resource-item">
                 <CheckCircle className="w-6 h-6 text-green-600" />
                 <span className="font-medium text-gray-800">Housing Assistance</span>
               </div>
             )}
             {userProfile?.hasChildren && (
               <>
-                <div className="flex items-center space-x-3 p-4 bg-green-50 rounded-lg">
+                <div className="dashboard-resource-item">
                   <CheckCircle className="w-6 h-6 text-green-600" />
                   <span className="font-medium text-gray-800">School Enrollment Support</span>
                 </div>
-                <div className="flex items-center space-x-3 p-4 bg-green-50 rounded-lg">
+                <div className="dashboard-resource-item">
                   <CheckCircle className="w-6 h-6 text-green-600" />
                   <span className="font-medium text-gray-800">Childcare Resources</span>
                 </div>
               </>
             )}
-            <div className="flex items-center space-x-3 p-4 bg-green-50 rounded-lg">
+            <div className="dashboard-resource-item">
               <CheckCircle className="w-6 h-6 text-green-600" />
               <span className="font-medium text-gray-800">Insurance Guidance</span>
             </div>
             {userProfile?.needsEmployment && (
-              <div className="flex items-center space-x-3 p-4 bg-green-50 rounded-lg">
+              <div className="dashboard-resource-item">
                 <CheckCircle className="w-6 h-6 text-green-600" />
                 <span className="font-medium text-gray-800">Employment Services</span>
               </div>
             )}
-            <div className="flex items-center space-x-3 p-4 bg-green-50 rounded-lg">
+            <div className="dashboard-resource-item">
               <CheckCircle className="w-6 h-6 text-green-600" />
               <span className="font-medium text-gray-800">Community Support</span>
             </div>
           </div>
+        </div>
+
+        <div className="dashboard-card">
+          <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
+            <h2 className="dashboard-card-title">Your Intake Answers</h2>
+            {!isEditingIntake ? (
+              <button
+                onClick={() => setIsEditingIntake(true)}
+                className="dashboard-btn dashboard-btn-primary"
+              >
+                Edit Answers
+              </button>
+            ) : (
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={handleCancelIntakeEdit}
+                  className="dashboard-btn dashboard-btn-neutral"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleSaveIntake}
+                  disabled={isSavingIntake}
+                  className="dashboard-btn dashboard-btn-success"
+                >
+                  {isSavingIntake ? 'Saving...' : 'Save Changes'}
+                </button>
+              </div>
+            )}
+          </div>
+
+          <p className="dashboard-card-subtitle mb-6">
+            Review your intake form responses and update them anytime.
+          </p>
+
+          {isLoadingIntake ? (
+            <p className="text-gray-600">Loading intake answers...</p>
+          ) : (
+            <div className="space-y-5">
+              {visibleIntakeQuestions.map((question) => {
+                const value = draftResponses[question.id];
+
+                return (
+                  <div key={question.id} className="dashboard-intake-item">
+                    <p className="font-medium text-gray-900 mb-3">{question.question}</p>
+
+                    {!isEditingIntake && (
+                      <p className="text-gray-700">{renderAnswer(value)}</p>
+                    )}
+
+                    {isEditingIntake && question.type === 'text' && (
+                      <input
+                        type="text"
+                        className="dashboard-input"
+                        value={value || ''}
+                        placeholder={question.placeholder || ''}
+                        onChange={(e) => handleDraftChange(question, e.target.value)}
+                      />
+                    )}
+
+                    {isEditingIntake && question.type === 'number' && (
+                      <input
+                        type="number"
+                        className="dashboard-input"
+                        value={value || ''}
+                        placeholder={question.placeholder || ''}
+                        onChange={(e) => handleDraftChange(question, e.target.value)}
+                      />
+                    )}
+
+                    {isEditingIntake && question.type === 'radio' && (
+                      <div className="space-y-2">
+                        {(question.options || []).map((option) => (
+                          <label key={option} className="flex items-center gap-2 text-gray-700">
+                            <input
+                              type="radio"
+                              name={question.id}
+                              value={option}
+                              checked={value === option}
+                              onChange={(e) => handleDraftChange(question, e.target.value)}
+                            />
+                            <span>{option}</span>
+                          </label>
+                        ))}
+                      </div>
+                    )}
+
+                    {isEditingIntake && question.type === 'checkbox' && (
+                      <div className="space-y-2">
+                        {(question.options || []).map((option) => {
+                          const selected = Array.isArray(value) ? value : [];
+                          return (
+                            <label key={option} className="flex items-center gap-2 text-gray-700">
+                              <input
+                                type="checkbox"
+                                value={option}
+                                checked={selected.includes(option)}
+                                onChange={(e) => {
+                                  if (e.target.checked) {
+                                    handleDraftChange(question, [...selected, option]);
+                                  } else {
+                                    handleDraftChange(
+                                      question,
+                                      selected.filter((item) => item !== option)
+                                    );
+                                  }
+                                }}
+                              />
+                              <span>{option}</span>
+                            </label>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+
+              {!visibleIntakeQuestions.length && (
+                <p className="text-gray-600">No intake answers available yet.</p>
+              )}
+            </div>
+          )}
+
+          {intakeError && (
+            <p className="mt-4 text-sm text-red-600">{intakeError}</p>
+          )}
         </div>
 
       </div>
