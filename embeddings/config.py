@@ -36,11 +36,11 @@ def get_required(key: str) -> str:
 
 # Embeddings / Pinecone
 PINECONE_API_KEY = get("PINECONE_API_KEY")
-INDEX_NAME = get("INDEX_NAME", "wildfire-narratives")
-JINA_MODEL = get("JINA_MODEL", "jinaai/jina-embeddings-v3")
+INDEX_NAME = "wildfire-narratives"
+JINA_MODEL = "jina-embeddings-v3"
 DIMENSION = 1024
 TOP_K = 5
 
 # Groq RAG
 GROQ_API_KEY = get("GROQ_API_KEY")
-GROQ_MODEL = get("GROQ_MODEL", "llama-3.3-70b-versatile")
+GROQ_MODEL = "llama-3.3-70b-versatile"
