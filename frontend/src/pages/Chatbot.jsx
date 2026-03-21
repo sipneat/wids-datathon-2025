@@ -3,6 +3,7 @@ import { Send, Sparkles, Bot, User, Lightbulb } from 'lucide-react';
 import { Layout } from '../components/Layout';
 import { sendChatMessage } from '../services/routes';
 
+
 const starterPrompts = [
   'I was displaced and still need to get to work. What should I do first?',
   'My insurance claim is pending. What can I do this week?',
@@ -15,7 +16,7 @@ const initialMessages = [
     id: 'welcome',
     role: 'assistant',
     content:
-      'I am your Recovery Assistant. Ask me about housing, insurance, school continuity, or financial next steps. While the model is still being integrated, this interface is running with placeholder responses.'
+      'I am your Recovery Assistant. Ask me about housing, insurance, school continuity, or financial next steps.'
   }
 ];
 
@@ -61,21 +62,30 @@ export default function Chatbot({ userProfile }) {
     }
 
     try {
+      const profileContext = {
+        name: userProfile?.name || userProfile?.displayName || null,
+        state: userProfile?.state || null,
+        county: userProfile?.county || null,
+        zipCode: userProfile?.zipCode || null,
+        hasChildren: Boolean(userProfile?.hasChildren),
+        needsHousing: Boolean(userProfile?.needsHousing),
+        needsEmployment: Boolean(userProfile?.needsEmployment),
+        hasInsurance: Boolean(userProfile?.hasInsurance),
+        insuranceType: userProfile?.insuranceType || null,
+        insuranceClaimStatus: userProfile?.insuranceClaimStatus || null,
+        caregivingNeeds: userProfile?.caregivingNeeds || [],
+        fireRadius: userProfile?.fireRadius ?? null,
+        fireSeverity: userProfile?.fireSeverity || null,
+        fireSeverityScore: userProfile?.fireSeverityScore ?? null,
+        housingBudget: userProfile?.housingBudget ?? null,
+      };
+
       const response = await sendChatMessage({
         userId,
         message: content,
         conversationId,
         context: {
-          profile: {
-            name: userProfile?.name || userProfile?.displayName || null,
-            hasChildren: Boolean(userProfile?.hasChildren),
-            needsHousing: Boolean(userProfile?.needsHousing),
-            needsEmployment: Boolean(userProfile?.needsEmployment),
-            hasInsurance: Boolean(userProfile?.hasInsurance),
-            insuranceType: userProfile?.insuranceType || null,
-            insuranceClaimStatus: userProfile?.insuranceClaimStatus || null,
-            caregivingNeeds: userProfile?.caregivingNeeds || []
-          }
+          profile: profileContext
         }
       });
 
@@ -84,24 +94,42 @@ export default function Chatbot({ userProfile }) {
       }
 
       const replyContent = response?.reply?.content;
+      const rankCount = Array.isArray(response?.meta?.ranking?.sorted_ids)
+        ? response.meta.ranking.sorted_ids.length
+        : 0;
+      const parsedReply = (() => {
+        if (typeof replyContent !== 'string') return null;
+        try {
+          return JSON.parse(replyContent);
+        } catch {
+          return null;
+        }
+      })();
+      const rankedIds = Array.isArray(parsedReply?.sorted_ids) ? parsedReply.sorted_ids : [];
+      const fallbackReply = rankedIds.length
+        ? `I found ${rankedIds.length} relevant resources. Top matches: ${rankedIds.slice(0, 3).join(', ')}.`
+        : 'I could not find matching resources right now. Please try rephrasing your request with location or urgency details.';
+      const finalReply = replyContent || fallbackReply;
+
       setMessages((prev) => [
         ...prev,
         {
           id: response?.reply?.id || `assistant-${Date.now()}`,
           role: 'assistant',
-          content:
-            replyContent ||
-            'Placeholder response: your model endpoint is not connected yet. Next we can wire this to your backend AI route and return grounded recommendations based on intake profile, insurance context, and local resource data.'
+          content: finalReply
         }
       ]);
     } catch (error) {
       console.error('Error sending chat message:', error);
+      const backendError = error?.data?.error || error?.message || null;
       setMessages((prev) => [
         ...prev,
         {
           id: `assistant-error-${Date.now()}`,
           role: 'assistant',
-          content: 'I could not reach the chat service. Please check that the backend is running and try again.'
+          content: backendError
+            ? `Chat request failed: ${backendError}`
+            : 'I could not reach the chat service. Please check that the backend is running and try again.'
         }
       ]);
     } finally {
@@ -141,7 +169,7 @@ export default function Chatbot({ userProfile }) {
             </div>
             <div className="mt-5 p-3 bg-amber-50 border border-amber-200 rounded-lg">
               <p className="text-xs text-amber-800">
-                Current mode: UI placeholder. Responses are mocked while model development is in progress.
+                Current mode: live backend chat. If provider keys are missing, this panel will show the exact backend error.
               </p>
             </div>
           </section>
