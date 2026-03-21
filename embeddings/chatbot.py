@@ -12,7 +12,7 @@ if str(_EMBED_DIR) not in sys.path:
     sys.path.insert(0, str(_EMBED_DIR))
 
 import config  # noqa: E402
-from data import load_embedding_model, get_pinecone_index, TOP_K  # noqa: E402
+from data import embed_query_text, get_pinecone_index, TOP_K  # noqa: E402
 
 GROQ_API_KEY = config.GROQ_API_KEY
 GROQ_MODEL = config.GROQ_MODEL
@@ -42,7 +42,8 @@ def rag_response(query: str, model, index, groq_client, top_k: int = TOP_K, sile
     Returns the LLM's answer string.
     If silent=False, also prints the retrieved matches (for debugging).
     """
-    query_vec = model.encode([query], task="retrieval.query")[0].tolist()
+    # Enforce Jina API embeddings for query-time retrieval (no local HF fallback).
+    query_vec = embed_query_text(query, model=None)
     results = index.query(vector=query_vec, top_k=top_k, include_metadata=True)
     docs = [m["metadata"].get("text", "") for m in results["matches"]]
 
@@ -112,10 +113,15 @@ def chat_loop(model, index):
 
 
 def main():
-    """Load model and index, then run the chat loop."""
-    print("Loading embedding model...")
-    model = load_embedding_model()
-    index = get_pinecone_index()
+    """Load Pinecone index, then run the chat loop with Jina API embeddings."""
+    if not config.get("JINA_API_KEY"):
+        print("ERROR: JINA_API_KEY not set.")
+        print("Add JINA_API_KEY to your environment/.env to use Jina embeddings.")
+        sys.exit(1)
+
+    model = None
+    pinecone_ref = get_pinecone_index()
+    index = pinecone_ref[1] if isinstance(pinecone_ref, tuple) else pinecone_ref
     chat_loop(model, index)
 
 
