@@ -14,6 +14,27 @@ export const INTAKE_QUESTIONS = [
     aiPrompt: 'Tell me about your household size'
   },
   {
+    id: 'state',
+    question: 'What state are you currently in?',
+    type: 'text',
+    placeholder: 'e.g., OR',
+    aiPrompt: 'Please share your state (2-letter code is preferred)'
+  },
+  {
+    id: 'county',
+    question: 'What county are you in?',
+    type: 'text',
+    placeholder: 'e.g., Washington County',
+    aiPrompt: 'Please share your county'
+  },
+  {
+    id: 'zip_code',
+    question: 'What is your ZIP code? (optional)',
+    type: 'text',
+    placeholder: 'e.g., 97123',
+    aiPrompt: 'Share your ZIP code if available'
+  },
+  {
     id: 'displacement_status',
     question: 'What best describes your current displacement status?',
     type: 'radio',
@@ -93,6 +114,21 @@ export const INTAKE_QUESTIONS = [
 ];
 
 export function buildProfileFromResponses(responses = {}) {
+  const normalizeState = (value) => {
+    const state = String(value || '').trim().toUpperCase();
+    return state || null;
+  };
+
+  const normalizeCounty = (value) => {
+    const county = String(value || '').trim().replace(/\s+/g, ' ');
+    return county || null;
+  };
+
+  const normalizeZip = (value) => {
+    const zip = String(value || '').trim();
+    return zip || null;
+  };
+
   const needsEmployment = ['Reduced hours', 'Temporarily laid off', 'Job lost', 'Self-employed revenue loss'].includes(
     responses.income_change || ''
   );
@@ -103,7 +139,20 @@ export function buildProfileFromResponses(responses = {}) {
     familySize: responses.familySize,
     hasChildren: responses.hasChildren === 'Yes',
     childrenAges: responses.childrenAges,
+    state: normalizeState(responses.state),
+    county: normalizeCounty(responses.county),
+    zipCode: normalizeZip(responses.zip_code),
     housingStatus: responses.displacement_status,
+    fireSeverity: responses.fire_severity,
+    fireRadius: responses.fire_radius,
+    fireSeverityScore: (() => {
+      const raw = responses.fire_severity || '';
+      if (raw.startsWith('Catastrophic')) return 0.95;
+      if (raw.startsWith('Severe')) return 0.8;
+      if (raw.startsWith('Moderate')) return 0.55;
+      if (raw.startsWith('Minor')) return 0.3;
+      return null;
+    })(),
     needsHousing,
     needsEmployment,
     hasInsurance: typeof responses.hasInsurance === 'string' ? responses.hasInsurance.includes('Yes') : false,

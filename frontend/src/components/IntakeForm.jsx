@@ -31,6 +31,9 @@ export const IntakeForm = ({ onComplete }) => {
         familySize: value > 1
           ? `Thanks — we’ll consider all ${value} household members.`
           : `Got it. We’ll tailor support to your situation.`,
+        state: `Thanks. We’ll focus recommendations for ${value}.`,
+        county: `Great. County-level context helps us localize wildfire recovery guidance.`,
+        zip_code: `Perfect. ZIP-level detail helps us narrow nearby options when available.`,
         hasChildren: value === 'Yes'
           ? `Understood. We’ll include school and childcare resources.`
           : `Okay. We’ll focus on your specific recovery needs.`,
@@ -120,6 +123,7 @@ export const IntakeForm = ({ onComplete }) => {
 
   const canProceed = () => {
     const answer = responses[currentQuestion.id];
+    if (currentQuestion.id === 'zip_code') return true;
     if (!answer) return false;
     if (currentQuestion.id === 'familySize') {
       const n = Number(answer);
