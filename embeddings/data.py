@@ -4,23 +4,35 @@
 import argparse
 import json
 import os
+import re
 import sys
+import time
 from pathlib import Path
 import pandas as pd
+import requests
 
 # Load .env before reading config
 import config  # noqa: F401
 
-DEMO_MAX_ROWS_PER_FILE = 2000
+_demo_rows_raw = str(config.get("DEMO_MAX_ROWS_PER_FILE", "500")).strip().lower()
+DEMO_MAX_ROWS_PER_FILE = None if _demo_rows_raw in {"", "none", "null", "-1"} else int(_demo_rows_raw)
 PINECONE_API_KEY = config.PINECONE_API_KEY
 INDEX_NAME = config.INDEX_NAME
 JINA_MODEL = config.JINA_MODEL
 DIMENSION = config.DIMENSION
 TOP_K = config.TOP_K
+JINA_API_KEY = config.get("JINA_API_KEY", "")
+JINA_EMBEDDING_DIMENSIONS = DIMENSION
+JINA_API_URL = "https://api.jina.ai/v1/embeddings"
+JINA_BATCH_SIZE = int(config.get("JINA_BATCH_SIZE", "8"))
 
 
 # STAGE 1: Load all CSV files from ./data into one big dataframe
-def load_all_csvs(data_dir: str = "./data") -> pd.DataFrame:
+def load_all_csvs(data_dir: str = None) -> pd.DataFrame:
+    if data_dir is None:
+        # Default: data folder is at project root, relative to this script location
+        script_dir = Path(__file__).resolve().parent
+        data_dir = str(script_dir.parent / "data")
     data_path = Path(data_dir)
     if not data_path.exists():
         raise FileNotFoundError(f"Data directory not found: {data_dir}")
@@ -60,6 +72,183 @@ def safe_float(val, default=None):
         return float(val)
     except (TypeError, ValueError):
         return default
+
+
+def safe_text(val, default=""):
+    if val is None:
+        return default
+    text = str(val).strip()
+    if not text or text.lower() == "nan":
+        return default
+    return text
+
+
+def normalize_state_code(val):
+    text = safe_text(val)
+    if not text:
+        return ""
+    text = text.upper()
+    if re.fullmatch(r"[A-Z]{2}", text):
+        return text
+    return ""
+
+
+def normalize_county_name(val):
+    text = safe_text(val)
+    if not text:
+        return ""
+    return " ".join(text.replace("\n", " ").split())
+
+
+def normalize_zip_code(val):
+    text = safe_text(val)
+    return text
+
+
+def classify_risk_category(incidents_5yr, severity, disruption):
+    if incidents_5yr >= 3:
+        return "high"
+    if incidents_5yr >= 1:
+        return "medium"
+    if severity == "high" or disruption == "high":
+        return "medium"
+    return "low"
+
+
+def estimate_return_timeline_months(severity, disruption):
+    if severity == "high" and disruption == "high":
+        return 18
+    if severity in ("high", "medium") or disruption == "high":
+        return 9
+    return 3
+
+
+def extract_incident_date(row: pd.Series):
+    raw = _row_value(
+        row,
+        [
+            "incidentBeginDate",
+            "incident_begin_date",
+            "incidentDate",
+            "declarationDate",
+            "declaration_date",
+            "start_date",
+            "date",
+        ],
+    )
+    if raw is None:
+        return pd.NaT
+    dt = pd.to_datetime(raw, errors="coerce", utc=True)
+    return dt
+
+
+def is_fire_event_row(row: pd.Series) -> bool:
+    incident_type = safe_text(_row_value(row, ["incidentType", "incident_type"]))
+    declaration_title = safe_text(_row_value(row, ["declarationTitle", "title"]))
+    source_name = safe_text(_row_value(row, ["source_incident_name", "name"]))
+    haystack = " ".join([incident_type, declaration_title, source_name]).lower()
+    return "fire" in haystack or "wildfire" in haystack
+
+
+def add_historical_risk_features(df: pd.DataFrame) -> pd.DataFrame:
+    df = df.copy()
+    df["_incident_date"] = df.apply(extract_incident_date, axis=1)
+    df["_is_fire_event"] = df.apply(is_fire_event_row, axis=1)
+    df["_incidents_5yr"] = 0
+    df["_avg_recurrence_years"] = 5.0
+
+    max_date = df["_incident_date"].dropna().max()
+    if pd.notna(max_date):
+        cutoff = max_date - pd.Timedelta(days=365 * 5)
+    else:
+        cutoff = None
+
+    grouped = df.groupby(["_state", "_county"], dropna=False)
+    for (state, county), group in grouped:
+        if not safe_text(state) or not safe_text(county):
+            continue
+
+        events = group[group["_is_fire_event"]]
+        if cutoff is not None:
+            recent = events[events["_incident_date"] >= cutoff]
+        else:
+            recent = events
+        incidents_5yr = int(len(recent))
+
+        recurrence = 5.0
+        dated = events["_incident_date"].dropna().sort_values().unique()
+        if len(dated) >= 2:
+            diffs = []
+            for i in range(1, len(dated)):
+                delta_days = (pd.Timestamp(dated[i]) - pd.Timestamp(dated[i - 1])).days
+                if delta_days > 0:
+                    diffs.append(delta_days / 365.25)
+            if diffs:
+                recurrence = round(sum(diffs) / len(diffs), 2)
+        elif incidents_5yr >= 3:
+            recurrence = 1.5
+        elif incidents_5yr >= 2:
+            recurrence = 2.5
+        elif incidents_5yr == 1:
+            recurrence = 4.0
+
+        mask = (df["_state"] == state) & (df["_county"] == county)
+        df.loc[mask, "_incidents_5yr"] = incidents_5yr
+        df.loc[mask, "_avg_recurrence_years"] = recurrence
+
+    df["_risk_category"] = df.apply(
+        lambda r: classify_risk_category(
+            int(r.get("_incidents_5yr", 0)),
+            safe_text(r.get("severity"), "low"),
+            safe_text(r.get("disruption"), "low"),
+        ),
+        axis=1,
+    )
+    df["_return_timeline_months"] = df.apply(
+        lambda r: estimate_return_timeline_months(
+            safe_text(r.get("severity"), "low"),
+            safe_text(r.get("disruption"), "low"),
+        ),
+        axis=1,
+    )
+    return df
+
+
+def _row_value(row: pd.Series, candidate_cols):
+    normalized = {str(col).strip().lower().replace("\n", " "): col for col in row.index}
+    for candidate in candidate_cols:
+        key = candidate.lower().strip()
+        if key in normalized:
+            return row.get(normalized[key])
+    return None
+
+
+def extract_location_fields(row: pd.Series) -> dict:
+    state = normalize_state_code(
+        _row_value(row, ["state_alpha", "stusps", "state", "statecode", "state code"])
+    )
+    county = normalize_county_name(
+        _row_value(
+            row,
+            [
+                "county",
+                "countyname",
+                "county_town_name",
+                "designatedArea",
+            ],
+        )
+    )
+
+    # FEMA designatedArea often looks like "Washington (County)".
+    if county and "(" in county:
+        county = county.split("(", 1)[0].strip()
+
+    zip_code = normalize_zip_code(_row_value(row, ["zip", "zip code", "postal", "postal code"]))
+    return {
+        "state": state,
+        "county": county,
+        "zip_code": zip_code,
+    }
 
 
 # Pull out acreage, containment %, and evacuation info from a single row
@@ -123,12 +312,17 @@ def estimate_disruption(containment, has_evacuation: bool) -> str:
 # STAGE 2: Add severity and disruption columns to the dataframe
 def compute_recovery_features(df: pd.DataFrame) -> pd.DataFrame:
     extracted = df.apply(extract_wildfire_fields, axis=1)
+    locations = df.apply(extract_location_fields, axis=1)
     df = df.copy()
     df["_acreage"] = [e["acreage"] for e in extracted]
     df["_containment"] = [e["containment"] for e in extracted]
     df["_has_evacuation"] = [e["has_evacuation"] for e in extracted]
+    df["_state"] = [l["state"] for l in locations]
+    df["_county"] = [l["county"] for l in locations]
+    df["_zip_code"] = [l["zip_code"] for l in locations]
     df["severity"] = df["_acreage"].apply(classify_severity)
     df["disruption"] = df.apply(lambda r: estimate_disruption(r["_containment"], r["_has_evacuation"]), axis=1)
+    df = add_historical_risk_features(df)
     return df
 
 
@@ -175,17 +369,107 @@ def generate_recovery_narrative(row: pd.Series) -> str:
     else:
         insurance = "Standard claim processes apply. Document any damage for claims."
 
+    state = safe_text(row.get("_state"))
+    county = safe_text(row.get("_county"))
+    zip_code = safe_text(row.get("_zip_code"))
+    location_parts = []
+    if county:
+        location_parts.append(f"County: {county}")
+    if state:
+        location_parts.append(f"State: {state}")
+    if zip_code:
+        location_parts.append(f"ZIP: {zip_code}")
+    location_summary = " ".join(location_parts) if location_parts else "Location: unknown"
+    incidents_5yr = int(safe_float(row.get("_incidents_5yr"), default=0) or 0)
+    recurrence_years = safe_float(row.get("_avg_recurrence_years"), default=5.0)
+    risk_category = safe_text(row.get("_risk_category"), "unknown")
+    return_timeline_months = int(safe_float(row.get("_return_timeline_months"), default=6) or 6)
+    history_summary = (
+        f"Past 5 years incidents: {incidents_5yr}. "
+        f"Average recurrence: {recurrence_years:.1f} years. "
+        f"Risk category: {risk_category}. "
+        f"Estimated return timeline: {return_timeline_months} months."
+    )
+
     event_label = name if pd.notna(name) and str(name).strip() else "Event"
-    return f"[{event_label}] " + " ".join([sev_summary, housing, timeline, insurance])
+    return f"[{event_label}] " + " ".join([location_summary, history_summary, sev_summary, housing, timeline, insurance])
 
 
 # STAGE 4 helper: Load Jina embedding model from HuggingFace (runs locally, no API key needed)
 def load_embedding_model():
-    print("Loading Jina embedding model (downloads ~2GB on first run)...")
-    from sentence_transformers import SentenceTransformer
-    model = SentenceTransformer(JINA_MODEL, trust_remote_code=True)
-    print("Model loaded.\n")
-    return model
+    # Kept for compatibility with existing call sites. Jina API is preferred.
+    return None
+
+
+def _jina_model_candidates():
+    candidates = [JINA_MODEL]
+    if "/" in JINA_MODEL:
+        candidates.append(JINA_MODEL.split("/", 1)[1])
+    else:
+        candidates.append(f"jinaai/{JINA_MODEL}")
+
+    seen = set()
+    return [m for m in candidates if not (m in seen or seen.add(m))]
+
+
+def _embed_with_jina_api(texts, task):
+    if not JINA_API_KEY:
+        raise ValueError("Missing JINA_API_KEY")
+
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {JINA_API_KEY}",
+    }
+
+    embeddings = []
+    for start in range(0, len(texts), JINA_BATCH_SIZE):
+        batch = texts[start:start + JINA_BATCH_SIZE]
+        last_error = None
+
+        for model_name in _jina_model_candidates():
+            payloads = [
+                {
+                    "model": model_name,
+                    "input": batch,
+                    "dimensions": JINA_EMBEDDING_DIMENSIONS,
+                    "task": task,
+                },
+                {
+                    "model": model_name,
+                    "input": batch,
+                    "task": task,
+                },
+                {
+                    "model": model_name,
+                    "input": batch,
+                },
+            ]
+
+            for payload in payloads:
+                res = requests.post(JINA_API_URL, json=payload, headers=headers, timeout=60)
+                if res.ok:
+                    body = res.json()
+                    ordered = sorted(body.get("data", []), key=lambda x: int(x.get("index", 0)))
+                    batch_embeddings = [item.get("embedding", []) for item in ordered]
+                    embeddings.extend(batch_embeddings)
+                    print(f"  Embedded {min(start + len(batch), len(texts))}/{len(texts)}")
+                    last_error = None
+                    break
+
+                last_error = res
+                if res.status_code == 429:
+                    time.sleep(4)
+                    continue
+                if res.status_code != 422:
+                    break
+
+            if last_error is None:
+                break
+
+        if last_error is not None:
+            raise ValueError(f"Jina embedding failed ({last_error.status_code}): {last_error.text}")
+
+    return embeddings
 
 
 # STAGE 4 helper: Connect to Pinecone and return the index (creates it if it doesn't exist)
@@ -213,13 +497,12 @@ def get_pinecone_index():
 # STAGE 4 helper: Embed unique narratives and upload them to Pinecone
 def upload_to_pinecone(df: pd.DataFrame, model, index):
     # Only embed unique narratives — many rows have identical text
-    unique_df = df.drop_duplicates(subset=["recovery_narrative"]).reset_index(drop=True)
+    unique_df = df.drop_duplicates(subset=["recovery_narrative", "_state", "_county", "_zip_code"]).reset_index(drop=True)
     print(f"Unique narratives to embed: {len(unique_df)}")
 
     texts = unique_df["recovery_narrative"].tolist()
-    print("Embedding narratives...")
-    # task="retrieval.passage" tells Jina these are documents (not queries)
-    embeddings = model.encode(texts, task="retrieval.passage", show_progress_bar=True).tolist()
+    print("Embedding narratives with Jina API...")
+    embeddings = _embed_with_jina_api(texts, task="retrieval.passage")
 
     # Build list of vectors with metadata to store alongside each embedding
     vectors = []
@@ -232,6 +515,13 @@ def upload_to_pinecone(df: pd.DataFrame, model, index):
                 "severity": str(row.get("severity", "")),
                 "disruption": str(row.get("disruption", "")),
                 "acreage": str(row.get("_acreage", "")),
+                "state": str(row.get("_state", "")),
+                "county": str(row.get("_county", "")),
+                "zip_code": str(row.get("_zip_code", "")),
+                "incidents_5yr": int(safe_float(row.get("_incidents_5yr"), default=0) or 0),
+                "avg_recurrence_years": float(safe_float(row.get("_avg_recurrence_years"), default=5.0) or 5.0),
+                "risk_category": str(row.get("_risk_category", "")),
+                "return_timeline_months": int(safe_float(row.get("_return_timeline_months"), default=6) or 6),
                 "source_file": str(row.get("_source_file", "")),
             }
         })
@@ -248,8 +538,7 @@ def upload_to_pinecone(df: pd.DataFrame, model, index):
 
 # STAGE 5 helper: Embed a query and find the most similar narratives in Pinecone
 def search(model, index, query: str):
-    # task="retrieval.query" tells Jina this is a search query (not a document)
-    query_vec = model.encode([query], task="retrieval.query")[0].tolist()
+    query_vec = embed_query_text(query, model=model)
     results = index.query(vector=query_vec, top_k=TOP_K, include_metadata=True)
 
     print(f"\n{'─' * 60}")
@@ -262,6 +551,60 @@ def search(model, index, query: str):
 
     # Return the matched texts so they can be passed to Groq later
     return [m["metadata"].get("text", "") for m in results["matches"]]
+
+
+def embed_query_text(query, model=None):
+    """Embed a user query using Jina API when available, otherwise fallback to local model."""
+    if JINA_API_KEY:
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {JINA_API_KEY}",
+        }
+        model_candidates = [JINA_MODEL]
+        if "/" in JINA_MODEL:
+            model_candidates.append(JINA_MODEL.split("/", 1)[1])
+        else:
+            model_candidates.append(f"jinaai/{JINA_MODEL}")
+
+        seen = set()
+        model_candidates = [m for m in model_candidates if not (m in seen or seen.add(m))]
+
+        last_error = None
+        for model_name in model_candidates:
+            payloads = [
+                {
+                    "model": model_name,
+                    "input": [query],
+                    "dimensions": JINA_EMBEDDING_DIMENSIONS,
+                    "task": "retrieval.query",
+                },
+                {
+                    "model": model_name,
+                    "input": [query],
+                    "task": "retrieval.query",
+                },
+                {
+                    "model": model_name,
+                    "input": [query],
+                },
+            ]
+
+            for payload in payloads:
+                res = requests.post(JINA_API_URL, json=payload, headers=headers, timeout=30)
+                if res.ok:
+                    body = res.json()
+                    return body["data"][0]["embedding"]
+                last_error = res
+                if res.status_code != 422:
+                    break
+
+        if last_error is not None:
+            raise ValueError(f"Jina query embedding failed ({last_error.status_code}): {last_error.text}")
+        raise ValueError("Jina query embedding failed: no response")
+
+    if model is None:
+        raise ValueError("Missing JINA_API_KEY for query embedding")
+    return model.encode([query], task="retrieval.query")[0].tolist()
 
 
 # STAGE 5: Interactive search loop — type a query, get matching narratives
@@ -345,9 +688,9 @@ def main():
     if vector_count > 0 and not args.rebuild:
         print(f"Pinecone already has {vector_count} vectors — skipping embed & upload.")
         print("Run with --rebuild to force re-upload.\n")
-        model = load_embedding_model()
+        model = None
     else:
-        model = load_embedding_model()
+        model = None
         upload_to_pinecone(df, model, index)
 
     print("=" * 60)
