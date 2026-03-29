@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Send, Loader, MessageSquare, Users, HelpCircle, Filter, TrendingUp, Pin } from 'lucide-react';
-import { collection, getDocs, limit, orderBy, query, startAfter, where } from 'firebase/firestore';
+import { collection, getDocs, limit, orderBy, query, startAfter } from 'firebase/firestore';
 import { CommunityPost } from '../components/CommunityPost';
 import { Layout } from '../components/Layout';
-import { createCommunityPost, createCommunityReply } from '../services/routes';
+import { createCommunityPost, createCommunityReply, deleteCommunityPost, deleteCommunityReply } from '../services/routes';
 import { db } from '../services/firebase';
 
 const PAGE_SIZE = 10;
@@ -15,7 +15,6 @@ export default function Community({ userProfile }) {
   const [newPost, setNewPost] = useState('');
   const [selectedRegion, setSelectedRegion] = useState('All Regions');
   const [selectedThread, setSelectedThread] = useState('general');
-  const [activeTab, setActiveTab] = useState('forum'); // 'forum', 'chat', 'faq'
   const [isLoading, setIsLoading] = useState(true);
   const [isPosting, setIsPosting] = useState(false);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
@@ -24,7 +23,30 @@ export default function Community({ userProfile }) {
   const [error, setError] = useState(null);
   const initialPostsRef = useRef([]);
 
+  const applyClientFilters = (items) => items.filter((post) => {
+    if (selectedRegion !== 'All Regions' && post.region !== selectedRegion) {
+      return false;
+    }
+    if (selectedThread !== 'general' && post.thread !== selectedThread) {
+      return false;
+    }
+    return true;
+  });
+
   const posts = useMemo(() => [...initialPosts, ...extraPosts], [initialPosts, extraPosts]);
+  const regionFilteredPosts = useMemo(() => posts.filter((post) => {
+    if (selectedRegion !== 'All Regions' && post.region !== selectedRegion) {
+      return false;
+    }
+    return true;
+  }), [posts, selectedRegion]);
+  const visiblePosts = useMemo(() => applyClientFilters(posts), [posts, selectedRegion, selectedThread]);
+  const threadCounts = useMemo(() => regionFilteredPosts.reduce((acc, post) => {
+    if (post.thread) {
+      acc[post.thread] = (acc[post.thread] || 0) + 1;
+    }
+    return acc;
+  }, {}), [regionFilteredPosts]);
 
   useEffect(() => {
     initialPostsRef.current = initialPosts;
@@ -67,14 +89,7 @@ export default function Community({ userProfile }) {
   };
 
   const buildPostQuery = (cursor = null, pageSize = PAGE_SIZE) => {
-    const filters = [];
-    if (selectedRegion !== 'All Regions') {
-      filters.push(where('region', '==', selectedRegion));
-    }
-    if (selectedThread !== 'general') {
-      filters.push(where('thread', '==', selectedThread));
-    }
-    const base = [collection(db, 'communityPosts'), ...filters, orderBy('createdAt', 'desc')];
+    const base = [collection(db, 'communityPosts'), orderBy('createdAt', 'desc')];
     if (cursor) {
       return query(...base, startAfter(cursor), limit(pageSize));
     }
@@ -151,33 +166,6 @@ export default function Community({ userProfile }) {
     { id: 'emotional', name: 'Emotional Support', icon: MessageSquare, count: 23 }
   ];
 
-  // FAQ data
-  const faqs = [
-    {
-      question: 'How do I apply for FEMA assistance?',
-      answer: 'You can apply for FEMA assistance online at DisasterAssistance.gov, by phone at 1-800-621-3362, or through the FEMA mobile app. You\'ll need your address, insurance information, and details about your losses.',
-      category: 'Financial Aid',
-      helpfulCount: 47
-    },
-    {
-      question: 'Can I get temporary housing assistance?',
-      answer: 'Yes, several programs are available: FEMA Temporary Housing Assistance, Red Cross Emergency Shelter, hotel/motel vouchers, and rental assistance programs. Call 211 for local resources or visit your local disaster recovery center.',
-      category: 'Housing',
-      helpfulCount: 62
-    },
-    {
-      question: 'What if my insurance claim is denied or too low?',
-      answer: 'You have the right to appeal. Document everything with photos and receipts. Consider hiring a public adjuster to help negotiate. Many are offering free consultations for fire victims. Legal aid services are also available.',
-      category: 'Insurance',
-      helpfulCount: 41
-    },
-    {
-      question: 'Where can I find mental health support?',
-      answer: 'Free crisis counseling is available through the Disaster Distress Helpline: 1-800-985-5990. Many therapists are offering sliding scale or pro-bono sessions for fire victims. Check with local community centers and churches for support groups.',
-      category: 'Mental Health',
-      helpfulCount: 38
-    }
-  ];
 
   useEffect(() => {
     if (!userProfile?.uid) {
@@ -211,6 +199,19 @@ export default function Community({ userProfile }) {
         userId: userProfile?.uid,
         payload: postData
       });
+      const post = data?.post;
+      if (post?.id) {
+        const createdAt = normalizeTimestamp(post.createdAt);
+        const normalizedPost = {
+          ...post,
+          createdAt,
+          user: post.userDisplayName || post.user || 'You',
+          time: formatRelativeTime(createdAt),
+          isPinned: Boolean(post.isPinned),
+          replies: []
+        };
+        setInitialPosts((prev) => [normalizedPost, ...prev]);
+      }
       setNewPost('');
       
     } catch (err) {
@@ -237,6 +238,24 @@ export default function Community({ userProfile }) {
       if (!data?.reply) {
         throw new Error('Failed to create reply');
       }
+      const reply = data.reply;
+      const createdAt = normalizeTimestamp(reply.createdAt);
+      const normalizedReply = {
+        ...reply,
+        createdAt,
+        user: reply.userDisplayName || reply.user || 'You',
+        time: formatRelativeTime(createdAt)
+      };
+      setInitialPosts((prev) => prev.map((post) => (
+        post.id === postId
+          ? { ...post, replies: [...(post.replies || []), normalizedReply] }
+          : post
+      )));
+      setExtraPosts((prev) => prev.map((post) => (
+        post.id === postId
+          ? { ...post, replies: [...(post.replies || []), normalizedReply] }
+          : post
+      )));
       
     } catch (err) {
       console.error('Error adding reply:', err);
@@ -278,6 +297,47 @@ export default function Community({ userProfile }) {
       setError('Failed to load more posts. Please try again.');
     } finally {
       setIsLoadingMore(false);
+    }
+  };
+
+  const handleDeletePost = async (postId) => {
+    if (!postId) return;
+    setError(null);
+    try {
+      await deleteCommunityPost({
+        userId: userProfile?.uid,
+        postId
+      });
+      setInitialPosts((prev) => prev.filter((post) => post.id !== postId));
+      setExtraPosts((prev) => prev.filter((post) => post.id !== postId));
+    } catch (err) {
+      console.error('Error deleting post:', err);
+      setError('Failed to delete post. Please try again.');
+    }
+  };
+
+  const handleDeleteReply = async (postId, replyId) => {
+    if (!postId || !replyId) return;
+    setError(null);
+    try {
+      await deleteCommunityReply({
+        userId: userProfile?.uid,
+        postId,
+        replyId
+      });
+      setInitialPosts((prev) => prev.map((post) => (
+        post.id === postId
+          ? { ...post, replies: (post.replies || []).filter((reply) => reply.id !== replyId) }
+          : post
+      )));
+      setExtraPosts((prev) => prev.map((post) => (
+        post.id === postId
+          ? { ...post, replies: (post.replies || []).filter((reply) => reply.id !== replyId) }
+          : post
+      )));
+    } catch (err) {
+      console.error('Error deleting reply:', err);
+      setError('Failed to delete reply. Please try again.');
     }
   };
 
@@ -325,42 +385,6 @@ export default function Community({ userProfile }) {
             </select>
           </div>
 
-          {/* Tab Navigation */}
-          <div className="flex space-x-2 border-b border-gray-200">
-            <button
-              onClick={() => setActiveTab('forum')}
-              className={`px-6 py-3 font-medium transition-colors ${
-                activeTab === 'forum'
-                  ? 'text-blue-600 border-b-2 border-blue-600'
-                  : 'text-gray-600 hover:text-gray-800'
-              }`}
-            >
-              <MessageSquare className="w-5 h-5 inline mr-2" />
-              Forum
-            </button>
-            <button
-              onClick={() => setActiveTab('chat')}
-              className={`px-6 py-3 font-medium transition-colors ${
-                activeTab === 'chat'
-                  ? 'text-blue-600 border-b-2 border-blue-600'
-                  : 'text-gray-600 hover:text-gray-800'
-              }`}
-            >
-              <Users className="w-5 h-5 inline mr-2" />
-              Group Chat
-            </button>
-            <button
-              onClick={() => setActiveTab('faq')}
-              className={`px-6 py-3 font-medium transition-colors ${
-                activeTab === 'faq'
-                  ? 'text-blue-600 border-b-2 border-blue-600'
-                  : 'text-gray-600 hover:text-gray-800'
-              }`}
-            >
-              <HelpCircle className="w-5 h-5 inline mr-2" />
-              FAQ
-            </button>
-          </div>
         </div>
 
         {/* Error Message */}
@@ -370,9 +394,7 @@ export default function Community({ userProfile }) {
           </div>
         )}
 
-        {/* Forum Tab */}
-        {activeTab === 'forum' && (
-          <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
+        <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
             {/* Thread Sidebar */}
             <div className="lg:col-span-1">
               <div className="bg-white rounded-xl shadow-sm p-4 sticky top-24">
@@ -399,7 +421,7 @@ export default function Community({ userProfile }) {
                             <span className="text-sm">{thread.name}</span>
                           </div>
                           <span className="text-xs bg-gray-200 px-2 py-1 rounded-full">
-                            {thread.count}
+                            {threadCounts[thread.id] || 0}
                           </span>
                         </div>
                       </button>
@@ -474,24 +496,37 @@ export default function Community({ userProfile }) {
               ) : (
                 /* Posts List */
                 <div className="space-y-4">
-                  {posts.length === 0 ? (
+                  {visiblePosts.length === 0 ? (
                     <div className="bg-white rounded-xl shadow-sm p-12 text-center">
                       <p className="text-gray-600">No posts yet in this thread. Be the first to share!</p>
                     </div>
                   ) : (
                     <>
                       {/* Pinned Posts First */}
-                      {posts.filter(p => p.isPinned).map(post => (
+                      {visiblePosts.filter(p => p.isPinned).map(post => (
                         <div key={post.id} className="relative">
                           <div className="absolute -top-2 -left-2 bg-yellow-500 text-white p-2 rounded-full shadow-lg z-10">
                             <Pin className="w-4 h-4" />
                           </div>
-                          <CommunityPost post={post} onReply={handleReply} />
+                          <CommunityPost
+                            post={post}
+                            onReply={handleReply}
+                            onDeletePost={handleDeletePost}
+                            onDeleteReply={handleDeleteReply}
+                            currentUserId={userProfile?.uid}
+                          />
                         </div>
                       ))}
                       {/* Regular Posts */}
-                      {posts.filter(p => !p.isPinned).map(post => (
-                        <CommunityPost key={post.id} post={post} onReply={handleReply} />
+                      {visiblePosts.filter(p => !p.isPinned).map(post => (
+                        <CommunityPost
+                          key={post.id}
+                          post={post}
+                          onReply={handleReply}
+                          onDeletePost={handleDeletePost}
+                          onDeleteReply={handleDeleteReply}
+                          currentUserId={userProfile?.uid}
+                        />
                       ))}
                       {hasMore && (
                         <div className="flex justify-center pt-2">
@@ -514,92 +549,6 @@ export default function Community({ userProfile }) {
               )}
             </div>
           </div>
-        )}
-
-        {/* Group Chat Tab (Placeholder) */}
-        {activeTab === 'chat' && (
-          <div className="bg-white rounded-xl shadow-sm p-12 text-center">
-            <Users className="w-16 h-16 text-gray-400 mx-auto mb-4" />
-            <h3 className="text-2xl font-semibold text-gray-800 mb-2">Group Chat Coming Soon</h3>
-            <p className="text-gray-600 max-w-md mx-auto">
-              Real-time group chat will be available soon. Connect with others in your region for instant support and conversation.
-            </p>
-            <div className="mt-6 p-4 bg-blue-50 rounded-lg max-w-md mx-auto">
-              <p className="text-sm text-gray-700">
-                <strong>Planned Features:</strong> Real-time messaging, region-specific rooms, direct messaging, file sharing
-              </p>
-            </div>
-          </div>
-        )}
-
-        {/* FAQ Tab */}
-        {activeTab === 'faq' && (
-          <div className="space-y-6">
-            <div className="bg-white rounded-xl shadow-sm p-6">
-              <h2 className="text-2xl font-semibold text-gray-800 mb-2">Frequently Asked Questions</h2>
-              <p className="text-gray-600">
-                Common questions from community members. These are based on the most discussed topics.
-              </p>
-              <div className="mt-4 p-3 bg-blue-50 rounded-lg">
-                <p className="text-sm text-blue-800">
-                  <TrendingUp className="w-4 h-4 inline mr-2" />
-                  <strong>Future Feature:</strong> AI will automatically summarize the most common questions and concerns from community posts.
-                </p>
-              </div>
-            </div>
-
-            <div className="space-y-4">
-              {faqs.map((faq, index) => (
-                <div key={index} className="bg-white rounded-xl shadow-sm p-6 border-l-4 border-blue-500">
-                  <div className="flex items-start justify-between mb-3">
-                    <h3 className="text-lg font-semibold text-gray-800 flex-1">
-                      {faq.question}
-                    </h3>
-                    <span className="px-3 py-1 bg-purple-100 text-purple-700 text-xs font-semibold rounded-full ml-4">
-                      {faq.category}
-                    </span>
-                  </div>
-                  <p className="text-gray-700 leading-relaxed mb-4">
-                    {faq.answer}
-                  </p>
-                  <div className="flex items-center justify-between pt-3 border-t border-gray-200">
-                    <span className="text-sm text-gray-600">
-                      {faq.helpfulCount} people found this helpful
-                    </span>
-                    <button className="text-sm text-blue-600 hover:text-blue-700 font-medium">
-                      Was this helpful?
-                    </button>
-                  </div>
-                </div>
-              ))}
-            </div>
-
-            {/* AI Summary Placeholder */}
-            <div className="bg-linear-to-r from-purple-50 to-blue-50 rounded-xl p-6 border border-purple-200">
-              <h3 className="font-semibold text-gray-800 mb-3 flex items-center">
-                <TrendingUp className="w-5 h-5 mr-2 text-purple-600" />
-                AI-Powered Insights (Coming Soon)
-              </h3>
-              <p className="text-gray-700 mb-4">
-                Our AI will analyze community discussions to automatically identify trending topics, common questions, and helpful resources shared by the community.
-              </p>
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <div className="bg-white p-4 rounded-lg">
-                  <p className="text-sm font-semibold text-gray-800 mb-1">Top Concern This Week</p>
-                  <p className="text-xs text-gray-600">Insurance claim processing times</p>
-                </div>
-                <div className="bg-white p-4 rounded-lg">
-                  <p className="text-sm font-semibold text-gray-800 mb-1">Most Shared Resource</p>
-                  <p className="text-xs text-gray-600">FEMA assistance application guide</p>
-                </div>
-                <div className="bg-white p-4 rounded-lg">
-                  <p className="text-sm font-semibold text-gray-800 mb-1">Community Sentiment</p>
-                  <p className="text-xs text-gray-600">Hopeful and supportive</p>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
       </div>
     </Layout>
   );

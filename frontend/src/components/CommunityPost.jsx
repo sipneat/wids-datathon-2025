@@ -1,9 +1,10 @@
 import { useState } from 'react';
-import { MessageCircle } from 'lucide-react';
+import { MessageCircle, Trash2 } from 'lucide-react';
 
-export const CommunityPost = ({ post, onReply }) => {
+export const CommunityPost = ({ post, onReply, onDeletePost, onDeleteReply, currentUserId }) => {
   const [showReplies, setShowReplies] = useState(false);
   const [replyText, setReplyText] = useState('');
+  const canDeletePost = currentUserId && post.userId === currentUserId;
 
   const handleReply = () => {
     if (replyText.trim()) {
@@ -19,12 +20,23 @@ export const CommunityPost = ({ post, onReply }) => {
           {post.user.charAt(0).toUpperCase()}
         </div>
         <div className="flex-1">
-          <div className="flex items-center space-x-2 mb-1">
+          <div className="flex items-center justify-between gap-3 mb-1">
+            <div className="flex items-center space-x-2">
             <span className="font-semibold text-gray-800">{post.user}</span>
             <span className="text-gray-400">•</span>
             <span className="text-sm text-gray-500">{post.region}</span>
             <span className="text-gray-400">•</span>
             <span className="text-sm text-gray-500">{post.time}</span>
+            </div>
+            {canDeletePost && (
+              <button
+                onClick={() => onDeletePost?.(post.id)}
+                className="text-xs text-red-600 hover:text-red-700 flex items-center gap-1"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                Delete
+              </button>
+            )}
           </div>
           <p className="text-gray-700 leading-relaxed mb-3">{post.content}</p>
           
@@ -53,9 +65,20 @@ export const CommunityPost = ({ post, onReply }) => {
             <div className="mt-4 space-y-3">
               {post.replies?.map((reply, index) => (
                 <div key={index} className="bg-gray-50 rounded-lg p-3 ml-4">
-                  <div className="flex items-center space-x-2 mb-1">
+                  <div className="flex items-center justify-between gap-3 mb-1">
+                    <div className="flex items-center space-x-2">
                     <span className="font-medium text-gray-800 text-sm">{reply.user}</span>
                     <span className="text-xs text-gray-500">{reply.time}</span>
+                    </div>
+                    {currentUserId && reply.userId === currentUserId && (
+                      <button
+                        onClick={() => onDeleteReply?.(post.id, reply.id)}
+                        className="text-xs text-red-600 hover:text-red-700 flex items-center gap-1"
+                      >
+                        <Trash2 className="w-3 h-3" />
+                        Delete
+                      </button>
+                    )}
                   </div>
                   <p className="text-gray-700 text-sm">{reply.content}</p>
                 </div>
