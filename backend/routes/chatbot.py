@@ -305,16 +305,93 @@ def _build_scoped_chat_context(messages, max_messages=6, max_chars=700):
     return scoped
 
 
-def _load_latest_conversation_id_for_user(user_id):
+def _load_latest_insurance_context(user_id, max_chars=1200):
+    def _extract_insurance_key_facts(text):
+        source = str(text or '')
+        patterns = {
+            'insurance_company': r'(?:Insurance Company\s*:\s*)([^\n\r]+)',
+            'policy_number': r'(?:Policy Number\s*:\s*)([^\n\r]+)',
+            'claim_number': r'(?:Claim Number\s*:\s*)([^\n\r]+)',
+            'coverage_period': r'(?:Coverage Period\s*:\s*)([^\n\r]+)',
+            'deductible': r'(?:Deductible\s*:\s*)([^\n\r]+)',
+            'dwelling_coverage': r'(?:Dwelling Coverage\s*:\s*)([^\n\r]+)',
+            'personal_property_coverage': r'(?:Personal Property\s*:\s*)([^\n\r]+)',
+            'ale_coverage': r'(?:Loss of Use \(ALE\)\s*:\s*)([^\n\r]+)',
+            'liability_coverage': r'(?:Liability\s*:\s*)([^\n\r]+)',
+            'date_of_loss': r'(?:Date of Loss\s*:\s*)([^\n\r]+)',
+            'date_filed': r'(?:Date Filed\s*:\s*)([^\n\r]+)',
+            'adjuster_name': r'(?:Name\s*:\s*)([^\n\r]+)',
+            'adjuster_contact': r'(?:Contact\s*:\s*)([^\n\r]+)',
+            'inspection_scheduled': r'(?:Inspection Scheduled\s*:\s*)([^\n\r]+)',
+            'ale_claimed_so_far': r'(?:Total ALE Claimed So Far\s*:\s*)([^\n\r]+)',
+        }
+
+        facts = {}
+        for key, pattern in patterns.items():
+            match = re.search(pattern, source, flags=re.IGNORECASE)
+            if match:
+                value = str(match.group(1) or '').strip().strip('*').strip()
+                if value:
+                    facts[key] = value
+        return facts
+
+    def _build_relevant_excerpt(text, max_len):
+        lines = [ln.strip() for ln in str(text or '').splitlines() if ln.strip()]
+        if not lines:
+            return ''
+
+        keywords = (
+            'coverage', 'deductible', 'claim', 'policy', 'ale', 'loss of use',
+            'inspection', 'adjuster', 'date filed', 'date of loss', 'liability'
+        )
+        relevant = [ln for ln in lines if any(k in ln.lower() for k in keywords)]
+        selected = relevant if relevant else lines
+        excerpt = '\n'.join(selected)
+        return excerpt[:max_len]
+
     try:
-        docs = (
-            db.collection('chatConversations')
-            .where('user_id', '==', user_id)
-            .order_by('updated_at', direction=firestore.Query.DESCENDING)
-            .limit(1)
+        docs = list(
+            db.collection('insuranceDocuments')
+            .where('userId', '==', user_id)
             .stream()
         )
-        for doc in docs:
+        docs.sort(
+            key=lambda d: ((d.to_dict() or {}).get('updatedAt') or datetime.min.replace(tzinfo=timezone.utc)),
+            reverse=True,
+        )
+        for doc in docs[:1]:
+            payload = doc.to_dict() or {}
+            edited_text = str(payload.get('editedText') or payload.get('extractedText') or '').strip()
+            if not edited_text:
+                return None
+            structured_fields = payload.get('structuredFields') or {}
+            key_facts = _extract_insurance_key_facts(edited_text)
+            return {
+                'documentId': doc.id,
+                'fileName': str(payload.get('fileName') or ''),
+                'status': str(payload.get('status') or ''),
+                'structuredFields': structured_fields,
+                'keyFacts': key_facts,
+                'textExcerpt': _build_relevant_excerpt(edited_text, max_chars),
+            }
+        return None
+    except Exception as e:
+        print(f'Error loading insurance context: {e}')
+        return None
+
+
+def _load_latest_conversation_id_for_user(user_id):
+    try:
+        docs = list(
+            db.collection('chatConversations')
+            .where('user_id', '==', user_id)
+            .stream()
+        )
+        docs.sort(
+            key=lambda d: ((d.to_dict() or {}).get('updated_at') or datetime.min.replace(tzinfo=timezone.utc)),
+            reverse=True,
+        )
+        for doc in docs[:1]:
             payload = doc.to_dict() or {}
             conversation_id = str(payload.get('conversation_id') or '').strip()
             if conversation_id:
@@ -557,7 +634,14 @@ def _query_matches_with_location_fallback(index, vector, top_k=12, include_metad
     return [], 'no_matches'
 
 
-def generate_fire_response(user_query, ranking, intake_summary, recent_user_queries=None, recent_chat_context=None):
+def generate_fire_response(
+    user_query,
+    ranking,
+    intake_summary,
+    recent_user_queries=None,
+    recent_chat_context=None,
+    insurance_context=None,
+):
     resources = ranking.get('top_resources', []) if isinstance(ranking, dict) else []
     if not resources:
         return (
@@ -613,7 +697,7 @@ def generate_fire_response(user_query, ranking, intake_summary, recent_user_quer
         )
 
     prompt = (
-        'You are a wildfire recovery assistant. Answer the user using only the retrieved resources and intake summary. '
+        'You are a wildfire recovery assistant. Answer the user using retrieved resources, intake summary, and insurance document context when available. '
         'Use a section style that matches the user question type. '
         'Use a balanced tone: recommend one best next action and include alternatives. Mention uncertainty if context is weak.\n\n'
         'Write concise, scannable sections. Avoid repeating the heading text in the paragraph body. '
@@ -628,9 +712,14 @@ def generate_fire_response(user_query, ranking, intake_summary, recent_user_quer
         'If heading is Move Decision, include an estimated move distance range. '
         'If heading is Return Timeline, include a months estimate from retrieved context. '
         'If heading is Job Recommendations, include concrete work/commute actions. '
-        'If heading is Insurance Recommendations, include concrete claim actions for this week.\n\n'
+        'If heading is Insurance Recommendations, include concrete claim actions for this week. '
+        'For insurance questions, prioritize Insurance document context and cite specific values (coverage limits, deductible, claim number, ALE, inspection date) when available. '
+        'Do not output placeholders like "check your policy" when exact policy values are present in context. '
+        'If insurance document context contains policy/claim/deductible/coverage/deadline details, use at least one concrete detail from it in the answer. '
+        'Do not invent document values that are not present.\n\n'
         f'Recent user queries: {json.dumps(recent_user_queries or [], ensure_ascii=True)}\n\n'
         f'Recent conversation context (scoped): {json.dumps(recent_chat_context or [], ensure_ascii=True)}\n\n'
+        f'Insurance document context (scoped): {json.dumps(insurance_context or {}, ensure_ascii=True)}\n\n'
         f'Selected response heading: {section_heading}\n\n'
         f'Intent hint: {intent_hint}\n\n'
         f'User query: {user_query}\n\n'
@@ -1065,6 +1154,7 @@ def send_chat_message():
             for m in conversation
             if m.get('role') == 'user' and isinstance(m.get('content'), str)
         ][-3:]
+        insurance_context = _load_latest_insurance_context(user_id)
 
         assistant_text = generate_fire_response(
             message,
@@ -1072,6 +1162,7 @@ def send_chat_message():
             intake_summary,
             recent_user_queries=recent_user_queries,
             recent_chat_context=recent_chat_context,
+            insurance_context=insurance_context,
         )
 
         user_message = {
@@ -1109,6 +1200,14 @@ def send_chat_message():
                 'history': {
                     'source': 'firestore',
                     'scoped_messages_used': len(recent_chat_context),
+                },
+                'insurance_context': {
+                    'attached': bool(insurance_context),
+                    'document_id': (insurance_context or {}).get('documentId') if insurance_context else None,
+                    'file_name': (insurance_context or {}).get('fileName') if insurance_context else None,
+                    'has_text_excerpt': bool((insurance_context or {}).get('textExcerpt')) if insurance_context else False,
+                    'has_structured_fields': bool((insurance_context or {}).get('structuredFields')) if insurance_context else False,
+                    'key_facts_count': len((insurance_context or {}).get('keyFacts') or {}) if insurance_context else 0,
                 },
             },
         }), 200
