@@ -116,6 +116,16 @@ export async function getResourceInsights({ userId }) {
   return requestJson('/resources/insights', { userId });
 }
 
+export async function getZillowListings({ userId, zipcode, state, city }) {
+  const params = new URLSearchParams();
+  if (zipcode) params.set('zipcode', zipcode);
+  if (state) params.set('state', state);
+  if (city) params.set('city', city);
+  const query = params.toString();
+  const path = query ? `/housing/zillow?${query}` : '/housing/zillow';
+  return requestJson(path, { userId });
+}
+
 export async function createCommunityPost({ userId, payload }) {
   return requestJson('/community/posts', {
     method: 'POST',
