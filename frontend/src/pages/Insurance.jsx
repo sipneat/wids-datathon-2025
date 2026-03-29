@@ -1,27 +1,41 @@
 import { useState, useEffect } from 'react';
 import { Layout } from '../components/Layout';
 import { Upload, AlertCircle, Clock, Home, DollarSign, FileText, Trash2 } from 'lucide-react';
+import {
+  uploadInsuranceDocument,
+  getInsuranceDocuments,
+  updateInsuranceDocument,
+  deleteInsuranceDocument,
+} from '../services/routes';
 
 export default function Insurance({ userProfile }) {
   const [uploadedFile, setUploadedFile] = useState(null);
   const [storedDocuments, setStoredDocuments] = useState([]);
   const [uploading, setUploading] = useState(false);
+  const [savingEdits, setSavingEdits] = useState(false);
   const [error, setError] = useState(null);
+  const [selectedDocumentId, setSelectedDocumentId] = useState(null);
+  const [editableText, setEditableText] = useState('');
+
+  const userId = userProfile?.uid || userProfile?.email || userProfile?.name || 'anonymous';
 
   // Load stored documents on mount
   useEffect(() => {
     const loadDocuments = async () => {
       try {
-        const docs = await insuranceStorageService.getUserDocuments(
-          userProfile?.uid || userProfile?.email || userProfile?.name || 'anonymous'
-        );
+        const response = await getInsuranceDocuments({ userId });
+        const docs = Array.isArray(response?.documents) ? response.documents : [];
         setStoredDocuments(docs);
+        if (docs.length > 0) {
+          setSelectedDocumentId(docs[0].id);
+          setEditableText(docs[0].editedText || docs[0].extractedText || '');
+        }
       } catch (err) {
         console.error('Error loading documents:', err);
       }
     };
     loadDocuments();
-  }, [userProfile]);
+  }, [userId]);
 
   const handleFileUpload = async (e) => {
     const file = e.target.files?.[0];
@@ -37,14 +51,19 @@ export default function Insurance({ userProfile }) {
     setError(null);
 
     try {
-      const userId = userProfile?.uid || userProfile?.email || userProfile?.name || 'anonymous';
-      const docMetadata = await insuranceStorageService.saveDocument(file, userId);
+      const response = await uploadInsuranceDocument({ userId, file });
+      const docMetadata = response?.document;
+      if (!docMetadata) {
+        throw new Error('No document metadata returned');
+      }
       
       setUploadedFile(docMetadata);
-      setStoredDocuments([...storedDocuments, docMetadata]);
+      setStoredDocuments((prev) => [docMetadata, ...prev.filter((doc) => doc.id !== docMetadata.id)]);
+      setSelectedDocumentId(docMetadata.id);
+      setEditableText(docMetadata.editedText || docMetadata.extractedText || '');
     } catch (err) {
       console.error('Error uploading file:', err);
-      setError('Failed to upload file. Please try again.');
+      setError(err?.message || 'Failed to upload file. Please try again.');
     } finally {
       setUploading(false);
     }
@@ -52,10 +71,16 @@ export default function Insurance({ userProfile }) {
 
   const handleDeleteDocument = async (documentId) => {
     try {
-      await insuranceStorageService.deleteDocument(documentId);
-      setStoredDocuments(storedDocuments.filter((doc) => doc.id !== documentId));
+      await deleteInsuranceDocument({ userId, documentId });
+      const remaining = storedDocuments.filter((doc) => doc.id !== documentId);
+      setStoredDocuments(remaining);
       if (uploadedFile?.id === documentId) {
         setUploadedFile(null);
+      }
+      if (selectedDocumentId === documentId) {
+        const nextDoc = remaining[0] || null;
+        setSelectedDocumentId(nextDoc?.id || null);
+        setEditableText(nextDoc ? (nextDoc.editedText || nextDoc.extractedText || '') : '');
       }
     } catch (err) {
       console.error('Error deleting document:', err);
@@ -63,8 +88,34 @@ export default function Insurance({ userProfile }) {
     }
   };
 
-  const handleClearFile = () => {
-    setUploadedFile(null);
+  const handleSelectDocument = (doc) => {
+    setSelectedDocumentId(doc.id);
+    setEditableText(doc.editedText || doc.extractedText || '');
+  };
+
+  const handleSaveEdits = async () => {
+    if (!selectedDocumentId || !editableText.trim()) return;
+    setSavingEdits(true);
+    setError(null);
+    try {
+      const response = await updateInsuranceDocument({
+        userId,
+        documentId: selectedDocumentId,
+        editedText: editableText,
+      });
+      const updated = response?.document;
+      if (!updated) throw new Error('No updated document returned');
+
+      setStoredDocuments((prev) => prev.map((doc) => (doc.id === updated.id ? updated : doc)));
+      if (uploadedFile?.id === updated.id) {
+        setUploadedFile(updated);
+      }
+    } catch (err) {
+      console.error('Error saving edits:', err);
+      setError(err?.message || 'Failed to save changes. Please try again.');
+    } finally {
+      setSavingEdits(false);
+    }
   };
 
   return (
@@ -262,7 +313,15 @@ export default function Insurance({ userProfile }) {
                   <div className="space-y-3">
                     <h3 className="font-semibold text-gray-800">Your Documents ({storedDocuments.length})</h3>
                     {storedDocuments.map((doc) => (
-                      <div key={doc.id} className="p-4 bg-green-50 border border-green-200 rounded-lg">
+                      <div
+                        key={doc.id}
+                        className={`p-4 border rounded-lg cursor-pointer transition ${
+                          selectedDocumentId === doc.id
+                            ? 'bg-blue-50 border-blue-300'
+                            : 'bg-green-50 border-green-200 hover:border-blue-200'
+                        }`}
+                        onClick={() => handleSelectDocument(doc)}
+                      >
                         <div className="flex items-start justify-between">
                           <div className="flex-1">
                             <p className="font-medium text-green-800 flex items-center space-x-2">
@@ -280,7 +339,10 @@ export default function Insurance({ userProfile }) {
                             </p>
                           </div>
                           <button
-                            onClick={() => handleDeleteDocument(doc.id)}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleDeleteDocument(doc.id);
+                            }}
                             className="text-green-700 hover:text-red-700 transition p-2"
                             title="Delete document"
                           >
@@ -295,8 +357,32 @@ export default function Insurance({ userProfile }) {
                 {uploadedFile && (
                   <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg">
                     <p className="text-blue-800 text-sm">
-                      ✓ File ready for AI analysis. Your document will be processed when the AI model is integrated to extract coverage details and provide personalized guidance.
+                      ✓ Document processed. Review and edit extracted text below before chatting with the assistant.
                     </p>
+                  </div>
+                )}
+
+                {selectedDocumentId && (
+                  <div className="p-4 bg-white border border-gray-200 rounded-lg space-y-3">
+                    <div className="flex items-center justify-between">
+                      <h4 className="font-semibold text-gray-800">Review Extracted Text</h4>
+                      <button
+                        onClick={handleSaveEdits}
+                        disabled={savingEdits || !editableText.trim()}
+                        className="px-3 py-2 rounded-lg bg-blue-600 text-white text-sm disabled:bg-gray-300"
+                      >
+                        {savingEdits ? 'Saving...' : 'Save Changes'}
+                      </button>
+                    </div>
+                    <p className="text-sm text-gray-600">
+                      Correct anything parsed incorrectly. The assistant will use this edited version for insurance guidance.
+                    </p>
+                    <textarea
+                      value={editableText}
+                      onChange={(e) => setEditableText(e.target.value)}
+                      className="w-full min-h-56 rounded-lg border border-gray-300 p-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      placeholder="Extracted text from your insurance document will appear here..."
+                    />
                   </div>
                 )}
               </div>
@@ -438,30 +524,6 @@ export default function Insurance({ userProfile }) {
                 <li><strong>Know your limit:</strong> Ask for your policy's ALE limit (often 20–30% of dwelling coverage)</li>
                 <li><strong>Submit regularly:</strong> File claims in monthly batches with supporting receipts</li>
               </ul>
-            </div>
-          </div>
-        </div>
-        )}
-
-        {/* AI Parsing Stub - Only show if insured */}
-        {userProfile?.hasInsurance && (
-        <div className="bg-linear-to-r from-purple-50 to-pink-50 rounded-xl shadow-sm p-8 border border-purple-200">
-          <div className="flex items-start space-x-4">
-            <AlertCircle className="w-6 h-6 text-purple-600 shrink-0 mt-1" />
-            <div>
-              <h3 className="text-lg font-semibold text-purple-900 mb-2">AI Policy Parsing (Coming Soon)</h3>
-              <p className="text-purple-800 mb-3">
-                Once you upload your insurance document, our AI will analyze it to:
-              </p>
-              <ul className="text-sm text-purple-700 space-y-1 ml-4 list-disc">
-                <li>Extract your coverage limits and deductible</li>
-                <li>Identify ALE/temporary housing coverage details</li>
-                <li>Flag important deadlines and requirements</li>
-                <li>Provide personalized guidance based on your specific policy</li>
-              </ul>
-              <p className="text-xs text-purple-600 mt-4 italic">
-                This feature is in development and will be available soon.
-              </p>
             </div>
           </div>
         </div>
