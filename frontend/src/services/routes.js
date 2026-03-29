@@ -112,6 +112,10 @@ export async function getCommunityPosts({ userId, region = null, thread = null }
   return requestJson(path, { userId });
 }
 
+export async function getResourceInsights({ userId }) {
+  return requestJson('/resources/insights', { userId });
+}
+
 export async function createCommunityPost({ userId, payload }) {
   return requestJson('/community/posts', {
     method: 'POST',
