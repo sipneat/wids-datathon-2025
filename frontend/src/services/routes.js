@@ -136,3 +136,28 @@ export async function deleteInsuranceDocument({ userId, documentId }) {
     userId
   });
 }
+
+export async function getCommunityPosts({ userId, region = null, thread = null }) {
+  const params = new URLSearchParams();
+  if (region) params.set('region', region);
+  if (thread) params.set('thread', thread);
+  const query = params.toString();
+  const path = query ? `/community/posts?${query}` : '/community/posts';
+  return requestJson(path, { userId });
+}
+
+export async function createCommunityPost({ userId, payload }) {
+  return requestJson('/community/posts', {
+    method: 'POST',
+    userId,
+    body: payload
+  });
+}
+
+export async function createCommunityReply({ userId, postId, payload }) {
+  return requestJson(`/community/posts/${postId}/replies`, {
+    method: 'POST',
+    userId,
+    body: payload
+  });
+}
