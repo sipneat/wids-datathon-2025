@@ -1,6 +1,6 @@
-import { useState, useEffect } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Layout } from '../components/Layout';
-import { Upload, AlertCircle, Clock, Home, DollarSign, FileText, Trash2 } from 'lucide-react';
+import { Upload, FileText, Trash2, AlertCircle, CheckCircle2 } from 'lucide-react';
 import {
   uploadInsuranceDocument,
   getInsuranceDocuments,
@@ -8,40 +8,78 @@ import {
   deleteInsuranceDocument,
 } from '../services/routes';
 
+function formatLabel(key) {
+  return key
+    .replace(/([A-Z])/g, ' $1')
+    .replace(/^./, (m) => m.toUpperCase())
+    .trim();
+}
+
 export default function Insurance({ userProfile }) {
-  const [uploadedFile, setUploadedFile] = useState(null);
-  const [storedDocuments, setStoredDocuments] = useState([]);
-  const [uploading, setUploading] = useState(false);
-  const [savingEdits, setSavingEdits] = useState(false);
-  const [error, setError] = useState(null);
+  const [documents, setDocuments] = useState([]);
   const [selectedDocumentId, setSelectedDocumentId] = useState(null);
   const [editableText, setEditableText] = useState('');
+  const [uploading, setUploading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState(null);
 
   const userId = userProfile?.uid || userProfile?.email || userProfile?.name || 'anonymous';
 
-  // Load stored documents on mount
   useEffect(() => {
+    let cancelled = false;
+
     const loadDocuments = async () => {
       try {
         const response = await getInsuranceDocuments({ userId });
         const docs = Array.isArray(response?.documents) ? response.documents : [];
-        setStoredDocuments(docs);
-        if (docs.length > 0) {
+        if (cancelled) return;
+
+        setDocuments(docs);
+        if (docs.length) {
           setSelectedDocumentId(docs[0].id);
           setEditableText(docs[0].editedText || docs[0].extractedText || '');
         }
       } catch (err) {
-        console.error('Error loading documents:', err);
+        if (!cancelled) {
+          setError('Unable to load insurance documents.');
+        }
       }
     };
+
     loadDocuments();
+    return () => {
+      cancelled = true;
+    };
   }, [userId]);
 
-  const handleFileUpload = async (e) => {
-    const file = e.target.files?.[0];
+  const selectedDocument = useMemo(
+    () => documents.find((doc) => doc.id === selectedDocumentId) || null,
+    [documents, selectedDocumentId]
+  );
+
+  const selectedSavedText = useMemo(
+    () => (selectedDocument ? (selectedDocument.editedText || selectedDocument.extractedText || '') : ''),
+    [selectedDocument]
+  );
+
+  const hasUnsavedChanges = useMemo(() => {
+    if (!selectedDocument) return false;
+    return editableText !== selectedSavedText;
+  }, [editableText, selectedSavedText, selectedDocument]);
+
+  const insights = useMemo(() => {
+    if (!selectedDocument?.structuredFields || typeof selectedDocument.structuredFields !== 'object') {
+      return [];
+    }
+    return Object.entries(selectedDocument.structuredFields)
+      .filter(([, value]) => String(value || '').trim().length > 0)
+      .slice(0, 8);
+  }, [selectedDocument]);
+
+  const onUpload = async (event) => {
+    const file = event.target.files?.[0];
     if (!file) return;
 
-    // Validate file size (10MB limit)
     if (file.size > 10 * 1024 * 1024) {
       setError('File is too large. Maximum 10MB allowed.');
       return;
@@ -49,54 +87,27 @@ export default function Insurance({ userProfile }) {
 
     setUploading(true);
     setError(null);
-
     try {
       const response = await uploadInsuranceDocument({ userId, file });
-      const docMetadata = response?.document;
-      if (!docMetadata) {
-        throw new Error('No document metadata returned');
-      }
-      
-      setUploadedFile(docMetadata);
-      setStoredDocuments((prev) => [docMetadata, ...prev.filter((doc) => doc.id !== docMetadata.id)]);
-      setSelectedDocumentId(docMetadata.id);
-      setEditableText(docMetadata.editedText || docMetadata.extractedText || '');
+      const doc = response?.document;
+      if (!doc) throw new Error('No document returned');
+
+      setDocuments((prev) => [doc, ...prev.filter((d) => d.id !== doc.id)]);
+      setSelectedDocumentId(doc.id);
+      setEditableText(doc.editedText || doc.extractedText || '');
     } catch (err) {
-      console.error('Error uploading file:', err);
-      setError(err?.message || 'Failed to upload file. Please try again.');
+      setError(err?.message || 'Upload failed. Please try again.');
     } finally {
       setUploading(false);
+      event.target.value = '';
     }
   };
 
-  const handleDeleteDocument = async (documentId) => {
-    try {
-      await deleteInsuranceDocument({ userId, documentId });
-      const remaining = storedDocuments.filter((doc) => doc.id !== documentId);
-      setStoredDocuments(remaining);
-      if (uploadedFile?.id === documentId) {
-        setUploadedFile(null);
-      }
-      if (selectedDocumentId === documentId) {
-        const nextDoc = remaining[0] || null;
-        setSelectedDocumentId(nextDoc?.id || null);
-        setEditableText(nextDoc ? (nextDoc.editedText || nextDoc.extractedText || '') : '');
-      }
-    } catch (err) {
-      console.error('Error deleting document:', err);
-      setError('Failed to delete document. Please try again.');
-    }
-  };
-
-  const handleSelectDocument = (doc) => {
-    setSelectedDocumentId(doc.id);
-    setEditableText(doc.editedText || doc.extractedText || '');
-  };
-
-  const handleSaveEdits = async () => {
+  const onSaveText = async () => {
     if (!selectedDocumentId || !editableText.trim()) return;
-    setSavingEdits(true);
+    setSaving(true);
     setError(null);
+
     try {
       const response = await updateInsuranceDocument({
         userId,
@@ -106,443 +117,174 @@ export default function Insurance({ userProfile }) {
       const updated = response?.document;
       if (!updated) throw new Error('No updated document returned');
 
-      setStoredDocuments((prev) => prev.map((doc) => (doc.id === updated.id ? updated : doc)));
-      if (uploadedFile?.id === updated.id) {
-        setUploadedFile(updated);
-      }
+      setDocuments((prev) => prev.map((doc) => (doc.id === updated.id ? updated : doc)));
     } catch (err) {
-      console.error('Error saving edits:', err);
-      setError(err?.message || 'Failed to save changes. Please try again.');
+      setError(err?.message || 'Could not save updates.');
     } finally {
-      setSavingEdits(false);
+      setSaving(false);
+    }
+  };
+
+  const onDelete = async (documentId) => {
+    try {
+      await deleteInsuranceDocument({ userId, documentId });
+      const remaining = documents.filter((doc) => doc.id !== documentId);
+      setDocuments(remaining);
+
+      if (selectedDocumentId === documentId) {
+        const next = remaining[0] || null;
+        setSelectedDocumentId(next?.id || null);
+        setEditableText(next ? (next.editedText || next.extractedText || '') : '');
+      }
+    } catch {
+      setError('Could not delete document.');
     }
   };
 
   return (
     <Layout userProfile={userProfile}>
-      <div className="max-w-4xl mx-auto space-y-8">
-        {/* Header */}
-        <div className="bg-linear-to-r from-blue-600 to-green-600 rounded-2xl shadow-lg p-8 text-white">
-          <h1 className="text-3xl font-bold mb-2">Insurance Guidance</h1>
-          <p className="text-blue-50 text-lg">
-            {userProfile?.hasInsurance
-              ? 'Understand your coverage, timelines, and benefits after evacuation'
-              : 'Quick steps to find emergency insurance coverage'}
+      <div className="max-w-4xl mx-auto space-y-6">
+        <div className="bg-linear-to-r from-blue-600 to-indigo-600 rounded-2xl shadow-lg p-8 text-white">
+          <h1 className="text-3xl font-bold">Insurance Assistant</h1>
+          <p className="text-blue-50 mt-2">
+            Upload your claim docs, review extracted details, then ask the chatbot for tailored guidance.
           </p>
         </div>
 
-        {/* UNINSURED PATH */}
-        {!userProfile?.hasInsurance && (
-          <>
-            {/* Urgent Help Section */}
-            <div className="bg-linear-to-r from-red-50 to-orange-50 rounded-xl shadow-sm p-8 border border-red-200">
-              <div className="flex items-start space-x-4">
-                <AlertCircle className="w-8 h-8 text-red-600 shrink-0 mt-1" />
-                <div>
-                  <h2 className="text-2xl font-semibold text-red-900 mb-3">You Don't Have Insurance Coverage</h2>
-                  <p className="text-red-800 mb-4">
-                    Without insurance, recovery becomes much more challenging. However, there are immediate steps you can take to protect yourself and access aid.
-                  </p>
-                </div>
-              </div>
-            </div>
-
-            {/* Quick Insurance Options */}
-            <div className="bg-white rounded-xl shadow-sm p-8 border border-gray-100">
-              <h2 className="text-2xl font-semibold text-gray-800 mb-6 flex items-center space-x-3">
-                <Home className="w-6 h-6 text-blue-600" />
-                <span>Quick Insurance Options</span>
-              </h2>
-
-              <div className="space-y-6">
-                {/* FAIR Plans */}
-                <div className="border-l-4 border-blue-500 pl-6">
-                  <h3 className="text-lg font-semibold text-gray-800 mb-2">FAIR Plans (Last Resort Coverage)</h3>
-                  <p className="text-gray-600 mb-3">
-                    If you've been denied insurance in the private market, you may qualify for a FAIR Plan (Facility and Insurance Rating). These are state-run insurance programs designed as a safety net.
-                  </p>
-                  <ul className="text-sm text-gray-600 space-y-2 ml-4 list-disc">
-                    <li><strong>Timeline:</strong> Can apply immediately online or by phone</li>
-                    <li><strong>Coverage:</strong> Covers dwelling and contents (limited coverage, higher premiums)</li>
-                    <li><strong>What to do:</strong> Contact your state's insurance commissioner's office or insurance agent</li>
-                    <li><strong>Note:</strong> Policies typically start 30–45 days after approval</li>
-                  </ul>
-                </div>
-
-                {/* Temporary Coverage */}
-                <div className="border-l-4 border-green-500 pl-6">
-                  <h3 className="text-lg font-semibold text-gray-800 mb-2">Emergency/Temporary Coverage</h3>
-                  <p className="text-gray-600 mb-3">
-                    Some insurers offer short-term policies or emergency homeowners insurance while your home is being rebuilt.
-                  </p>
-                  <ul className="text-sm text-gray-600 space-y-2 ml-4 list-disc">
-                    <li>Call local insurance agents and ask about emergency reconstruction policies</li>
-                    <li>Ask about temporary coverage while waiting for FAIR Plan approval</li>
-                    <li>Some specialty insurers work with disaster-affected homeowners</li>
-                  </ul>
-                </div>
-
-                {/* Renters Insurance */}
-                <div className="border-l-4 border-purple-500 pl-6">
-                  <h3 className="text-lg font-semibold text-gray-800 mb-2">If You Were a Renter</h3>
-                  <p className="text-gray-600 mb-3">
-                    Renters insurance is significantly cheaper than homeowners and easier to get, even after a loss.
-                  </p>
-                  <ul className="text-sm text-gray-600 space-y-2 ml-4 list-disc">
-                    <li><strong>Cost:</strong> $10–30/month (vs. FAIR Plans at $50–200+/month)</li>
-                    <li><strong>Coverage:</strong> Your personal belongings and temporary housing</li>
-                    <li><strong>How to get:</strong> Call insurance agents or use online marketplaces (Lemonade, Thimble, etc.)</li>
-                  </ul>
-                </div>
-              </div>
-            </div>
-
-            {/* Government & Non-Profit Aid */}
-            <div className="bg-white rounded-xl shadow-sm p-8 border border-gray-100">
-              <h2 className="text-2xl font-semibold text-gray-800 mb-6 flex items-center space-x-3">
-                <DollarSign className="w-6 h-6 text-green-600" />
-                <span>Emergency Financial & Housing Aid (No Insurance Needed)</span>
-              </h2>
-
-              <div className="space-y-4 text-gray-700">
-                <div className="bg-blue-50 border-l-4 border-blue-500 p-4 rounded">
-                  <p className="font-semibold text-blue-900 mb-2">FEMA Individual Assistance</p>
-                  <p className="text-sm text-blue-800 mb-2">
-                    You may qualify for FEMA disaster assistance for housing, medical, and other recovery needs — regardless of insurance status.
-                  </p>
-                  <p className="text-xs text-blue-700">
-                    <strong>How to apply:</strong> DisasterAssistance.gov or call 1-800-621-3362
-                  </p>
-                </div>
-
-                <div className="bg-green-50 border-l-4 border-green-500 p-4 rounded">
-                  <p className="font-semibold text-green-900 mb-2">State Disaster Assistance</p>
-                  <p className="text-sm text-green-800">
-                    Many states offer additional grants for uninsured or underinsured disaster victims. Contact your state's emergency management agency.
-                  </p>
-                </div>
-
-                <div className="bg-purple-50 border-l-4 border-purple-500 p-4 rounded">
-                  <p className="font-semibold text-purple-900 mb-2">Non-Profit Organizations</p>
-                  <p className="text-sm text-purple-800 mb-2">
-                    Organizations like the Red Cross, United Way, and local nonprofits provide emergency grants for disaster survivors.
-                  </p>
-                  <p className="text-xs text-purple-700">
-                    <strong>Search:</strong> DisasterRecoveryFunding.org or contact 211 (dial 2-1-1)
-                  </p>
-                </div>
-              </div>
-            </div>
-
-            {/* Next Steps */}
-            <div className="bg-yellow-50 rounded-xl p-6 border border-yellow-200">
-              <h3 className="font-semibold text-yellow-900 mb-3">Your Next Steps</h3>
-              <ol className="text-yellow-800 text-sm space-y-2 ml-4 list-decimal">
-                <li><strong>Apply for FEMA assistance immediately</strong> (don't wait for insurance)</li>
-                <li><strong>Contact your state's insurance commissioner</strong> to inquire about FAIR Plan eligibility</li>
-                <li><strong>Call local insurance agents</strong> to ask about emergency/temporary coverage options</li>
-                <li><strong>Reach out to 211</strong> for non-profit aid and local resources</li>
-                <li><strong>Document everything</strong> (photos, receipts) for insurance or aid applications</li>
-              </ol>
-            </div>
-          </>
+        {error && (
+          <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-red-800 text-sm">
+            {error}
+          </div>
         )}
 
-        {/* INSURED PATH */}
-        {userProfile?.hasInsurance && (
-          <>
-            {/* Insurance Status Summary */}
-            <div className={`rounded-xl shadow-sm p-6 border ${
-              userProfile.insuranceClaimStatus === 'Approved'
-                ? 'bg-green-50 border-green-200'
-                : userProfile.insuranceClaimStatus === 'Denied'
-                ? 'bg-red-50 border-red-200'
-                : 'bg-blue-50 border-blue-200'
-            }`}>
-              <p className="font-semibold text-gray-800 mb-1">Your Insurance Status</p>
-              <p className={`text-sm ${
-                userProfile.insuranceClaimStatus === 'Approved'
-                  ? 'text-green-700'
-                  : userProfile.insuranceClaimStatus === 'Denied'
-                  ? 'text-red-700'
-                  : 'text-blue-700'
-              }`}>
-                Coverage: <strong>{userProfile.insuranceType}</strong> | 
-                Claim Status: <strong>{userProfile.insuranceClaimStatus || 'Not provided'}</strong>
-              </p>
-            </div>
+        <section className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
+          <div className="flex items-center space-x-2 mb-4">
+            <Upload className="w-5 h-5 text-blue-600" />
+            <h2 className="text-xl font-semibold text-gray-900">Upload</h2>
+          </div>
 
-            {/* Document Upload */}
-            <div className="bg-white rounded-xl shadow-sm p-8 border border-gray-100">
-              <div className="flex items-center space-x-3 mb-6">
-                <FileText className="w-6 h-6 text-blue-600" />
-                <h2 className="text-2xl font-semibold text-gray-800">Upload Your Insurance Document</h2>
-              </div>
+          <label className={`block border-2 border-dashed rounded-xl p-6 text-center transition ${uploading ? 'opacity-60 border-gray-300 bg-gray-50' : 'border-blue-200 hover:bg-blue-50 cursor-pointer'}`}>
+            <input
+              type="file"
+              onChange={onUpload}
+              disabled={uploading}
+              accept=".pdf,.png,.jpg,.jpeg,.webp"
+              className="hidden"
+            />
+            <p className="font-medium text-gray-800">{uploading ? 'Uploading...' : 'Click to upload document'}</p>
+            <p className="text-sm text-gray-500 mt-1">PDF, PNG, JPG, JPEG, WEBP up to 10MB</p>
+          </label>
 
-              <div className="space-y-4">
-                <p className="text-gray-600">
-                  Upload your insurance policy, declaration page, or claim documents. We'll store them securely and use AI to extract key information like coverage limits, deductibles, and important deadlines.
-                </p>
-
-                {error && (
-                  <div className="p-4 bg-red-50 border border-red-200 rounded-lg">
-                    <p className="text-red-800 text-sm">{error}</p>
-                  </div>
-                )}
-
-                <div className="border-2 border-dashed border-gray-300 rounded-xl p-8 text-center bg-gray-50 hover:bg-blue-50 transition">
-                  <input
-                    type="file"
-                    id="insurance-upload"
-                    onChange={handleFileUpload}
-                    disabled={uploading}
-                    accept=".pdf,.png,.jpg,.jpeg,.doc,.docx"
-                    className="hidden"
-                  />
-                  <label htmlFor="insurance-upload" className={`cursor-pointer ${uploading ? 'opacity-50' : ''}`}>
-                    <Upload className="w-12 h-12 text-gray-400 mx-auto mb-3" />
-                    <p className="text-gray-700 font-medium mb-1">
-                      {uploading ? 'Uploading...' : 'Click to upload or drag and drop'}
+          {documents.length > 0 && (
+            <div className="mt-4 space-y-2">
+              {documents.map((doc) => (
+                <div
+                  key={doc.id}
+                  className={`rounded-lg border p-3 flex items-center justify-between ${selectedDocumentId === doc.id ? 'border-blue-300 bg-blue-50' : 'border-gray-200 bg-white'}`}
+                >
+                  <button
+                    type="button"
+                    className="text-left flex-1"
+                    onClick={() => {
+                      setSelectedDocumentId(doc.id);
+                      setEditableText(doc.editedText || doc.extractedText || '');
+                    }}
+                  >
+                    <p className="font-medium text-gray-800">{doc.fileName}</p>
+                    <p className="text-xs text-gray-500">
+                      {Math.round((doc.fileSize || 0) / 1024)} KB • {doc.status || 'processed'}
                     </p>
-                    <p className="text-sm text-gray-500">PDF, PNG, JPG, DOC up to 10MB</p>
-                  </label>
+                  </button>
+                  <button
+                    type="button"
+                    className="text-gray-400 hover:text-red-600 p-2"
+                    onClick={() => onDelete(doc.id)}
+                    title="Delete document"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
                 </div>
+              ))}
+            </div>
+          )}
+        </section>
 
-                {/* Stored Documents List */}
-                {storedDocuments.length > 0 && (
-                  <div className="space-y-3">
-                    <h3 className="font-semibold text-gray-800">Your Documents ({storedDocuments.length})</h3>
-                    {storedDocuments.map((doc) => (
-                      <div
-                        key={doc.id}
-                        className={`p-4 border rounded-lg cursor-pointer transition ${
-                          selectedDocumentId === doc.id
-                            ? 'bg-blue-50 border-blue-300'
-                            : 'bg-green-50 border-green-200 hover:border-blue-200'
-                        }`}
-                        onClick={() => handleSelectDocument(doc)}
-                      >
-                        <div className="flex items-start justify-between">
-                          <div className="flex-1">
-                            <p className="font-medium text-green-800 flex items-center space-x-2">
-                              <FileText className="w-4 h-4" />
-                              <span>{doc.fileName}</span>
-                            </p>
-                            <p className="text-xs text-green-600 mt-1">
-                              {(doc.fileSize / 1024).toFixed(1)} KB • Uploaded{' '}
-                              {new Date(doc.uploadedAt).toLocaleDateString()}
-                            </p>
-                            <p className={`text-xs mt-1 font-medium ${
-                              doc.status === 'pending_ai_analysis' ? 'text-yellow-600' : 'text-green-600'
-                            }`}>
-                              Status: {doc.status.replace(/_/g, ' ')}
-                            </p>
-                          </div>
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleDeleteDocument(doc.id);
-                            }}
-                            className="text-green-700 hover:text-red-700 transition p-2"
-                            title="Delete document"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
+        <section className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
+          <div className="flex items-center space-x-2 mb-4">
+            <FileText className="w-5 h-5 text-indigo-600" />
+            <h2 className="text-xl font-semibold text-gray-900">Key Insights</h2>
+          </div>
 
-                {uploadedFile && (
-                  <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg">
-                    <p className="text-blue-800 text-sm">
-                      ✓ Document processed. Review and edit extracted text below before chatting with the assistant.
-                    </p>
-                  </div>
-                )}
+          {!selectedDocument && (
+            <p className="text-sm text-gray-600">Upload a document to see extracted insurance details.</p>
+          )}
 
-                {selectedDocumentId && (
-                  <div className="p-4 bg-white border border-gray-200 rounded-lg space-y-3">
-                    <div className="flex items-center justify-between">
-                      <h4 className="font-semibold text-gray-800">Review Extracted Text</h4>
-                      <button
-                        onClick={handleSaveEdits}
-                        disabled={savingEdits || !editableText.trim()}
-                        className="px-3 py-2 rounded-lg bg-blue-600 text-white text-sm disabled:bg-gray-300"
-                      >
-                        {savingEdits ? 'Saving...' : 'Save Changes'}
-                      </button>
+          {selectedDocument && (
+            <div className="space-y-4">
+              {insights.length > 0 ? (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  {insights.map(([key, value]) => (
+                    <div key={key} className="rounded-lg border border-indigo-100 bg-indigo-50 p-3">
+                      <p className="text-xs font-semibold tracking-wide text-indigo-700 uppercase">{formatLabel(key)}</p>
+                      <p className="text-sm text-indigo-900 mt-1">{String(value)}</p>
                     </div>
-                    <p className="text-sm text-gray-600">
-                      Correct anything parsed incorrectly. The assistant will use this edited version for insurance guidance.
-                    </p>
-                    <textarea
-                      value={editableText}
-                      onChange={(e) => setEditableText(e.target.value)}
-                      className="w-full min-h-56 rounded-lg border border-gray-300 p-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                      placeholder="Extracted text from your insurance document will appear here..."
-                    />
-                  </div>
-                )}
+                  ))}
+                </div>
+              ) : (
+                <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+                  No structured insights found yet. You can still edit the extracted text below.
+                </div>
+              )}
+
+              <div>
+                <p className="text-sm font-medium text-gray-700 mb-2">Review / Correct Extracted Text</p>
+                <textarea
+                  value={editableText}
+                  onChange={(e) => setEditableText(e.target.value)}
+                  className="w-full min-h-48 rounded-lg border border-gray-300 p-3 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  placeholder="Extracted text appears here..."
+                />
+                <div className="mt-3 flex justify-end">
+                  {hasUnsavedChanges ? (
+                    <button
+                      type="button"
+                      onClick={onSaveText}
+                      disabled={saving || !editableText.trim()}
+                      className="px-4 py-2 rounded-lg bg-indigo-600 text-white text-sm disabled:bg-gray-300"
+                    >
+                      {saving ? 'Saving...' : 'Save Changes'}
+                    </button>
+                  ) : (
+                    <div className="inline-flex items-center gap-2 text-sm text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2">
+                      <CheckCircle2 className="w-4 h-4" />
+                      <span>Already saved</span>
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
-            </>
-        )}
+          )}
+        </section>
 
-        {/* Coverage Timelines - Only show if insured */}
-        {userProfile?.hasInsurance && (
-          <div className="bg-white rounded-xl shadow-sm p-8 border border-gray-100">
-            <div className="flex items-center space-x-3 mb-6">
-              <Clock className="w-6 h-6 text-green-600" />
-              <h2 className="text-2xl font-semibold text-gray-800">Coverage Timelines</h2>
-            </div>
-
-          <div className="space-y-6">
-            <div className="border-l-4 border-green-500 pl-6">
-              <h3 className="text-lg font-semibold text-gray-800 mb-2">Claim Filing</h3>
-              <p className="text-gray-600 mb-3">
-                Most insurance policies require claims to be filed within 1–2 years of the loss date. However, it's best to file as soon as possible.
-              </p>
-              <ul className="text-sm text-gray-600 space-y-1 ml-4 list-disc">
-                <li>Notify your insurer within 30 days of loss (typical requirement)</li>
-                <li>Provide proof of loss documentation within 60–90 days</li>
-                <li>Document all damage with photos and written descriptions</li>
-              </ul>
-            </div>
-
-            <div className="border-l-4 border-blue-500 pl-6">
-              <h3 className="text-lg font-semibold text-gray-800 mb-2">Adjuster Assignment & Inspection</h3>
-              <p className="text-gray-600 mb-3">
-                After filing, an insurance adjuster will be assigned to inspect damage and estimate repair/replacement costs.
-              </p>
-              <ul className="text-sm text-gray-600 space-y-1 ml-4 list-disc">
-                <li>Initial assignment: 5–10 business days after claim filed</li>
-                <li>Inspection scheduling: 1–3 weeks after assignment</li>
-                <li>You can request a public adjuster to help you (at your own cost)</li>
-              </ul>
-            </div>
-
-            <div className="border-l-4 border-purple-500 pl-6">
-              <h3 className="text-lg font-semibold text-gray-800 mb-2">Settlement & Payment</h3>
-              <p className="text-gray-600 mb-3">
-                Once the claim is approved, payment timelines depend on your policy and claim complexity.
-              </p>
-              <ul className="text-sm text-gray-600 space-y-1 ml-4 list-disc">
-                <li>Simple claims: 2–4 weeks after approval</li>
-                <li>Complex claims: 1–3 months (disputes, appraisals, etc.)</li>
-                <li>Deductible amount will be subtracted from payment</li>
-              </ul>
-            </div>
-          </div>
-        </div>
-        )}
-
-        {/* Housing Assistance - Only show if insured */}
-        {userProfile?.hasInsurance && (
-        <div className="bg-white rounded-xl shadow-sm p-8 border border-gray-100">
-          <div className="flex items-center space-x-3 mb-6">
-            <Home className="w-6 h-6 text-blue-600" />
-            <h2 className="text-2xl font-semibold text-gray-800">Housing Assistance Coverage</h2>
+        <section className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
+          <div className="flex items-center space-x-2 mb-4">
+            <CheckCircle2 className="w-5 h-5 text-emerald-600" />
+            <h2 className="text-xl font-semibold text-gray-900">Next Steps</h2>
           </div>
 
-          <div className="space-y-4 text-gray-700">
-            <p>
-              Most homeowners and renters insurance policies include coverage for temporary housing while your home is being repaired or rebuilt.
-            </p>
+          <ol className="list-decimal ml-5 text-sm text-gray-700 space-y-2">
+            <li>Upload your latest insurance document from the claim process.</li>
+            <li>Review and correct extracted text or key facts if anything is wrong.</li>
+            <li>Open the chatbot and ask insurance questions to get guidance grounded in this document.</li>
+          </ol>
 
-            <div className="bg-blue-50 border-l-4 border-blue-500 p-4 rounded">
-              <p className="font-semibold text-blue-900 mb-2">What is typically covered?</p>
-              <ul className="text-sm space-y-2 ml-4 list-disc">
-                <li>Hotel, motel, or temporary rental costs</li>
-                <li>Additional food expenses beyond normal living costs</li>
-                <li>Storage fees for personal belongings</li>
-                <li>Pet boarding (in some policies)</li>
-              </ul>
-            </div>
-
-            <div className="bg-green-50 border-l-4 border-green-500 p-4 rounded">
-              <p className="font-semibold text-green-900 mb-2">Coverage limits</p>
-              <ul className="text-sm space-y-2 ml-4 list-disc">
-                <li>Usually 20–30% of your dwelling coverage limit</li>
-                <li>May be capped at $50–200 per day depending on policy</li>
-                <li>Coverage period typically 12–24 months</li>
-              </ul>
-            </div>
-
-            <div className="bg-yellow-50 border-l-4 border-yellow-500 p-4 rounded">
-              <p className="font-semibold text-yellow-900 mb-2">What to do</p>
-              <ul className="text-sm space-y-2 ml-4 list-disc">
-                <li>Keep all receipts for temporary housing and meals</li>
-                <li>Submit documentation to your insurer within 30 days of expenses</li>
-                <li>Ask about the maximum benefit amount for your claim</li>
-              </ul>
-            </div>
+          <div className="mt-4 rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800 flex items-start gap-2">
+            <AlertCircle className="w-4 h-4 mt-0.5 shrink-0" />
+            <span>
+              The chatbot uses your saved edited text as additional context, so keeping this section accurate improves recommendations.
+            </span>
           </div>
-        </div>
-        )}
-
-        {/* Additional Living Expenses (ALE) - Only show if insured */}
-        {userProfile?.hasInsurance && (
-        <div className="bg-white rounded-xl shadow-sm p-8 border border-gray-100">
-          <div className="flex items-center space-x-3 mb-6">
-            <DollarSign className="w-6 h-6 text-green-600" />
-            <h2 className="text-2xl font-semibold text-gray-800">Additional Living Expenses (ALE)</h2>
-          </div>
-
-          <div className="space-y-4 text-gray-700">
-            <p>
-              ALE (also called "Loss of Use" coverage) reimburses you for extra costs you incur while temporarily displaced from your home.
-            </p>
-
-            <div className="bg-blue-50 border-l-4 border-blue-500 p-4 rounded">
-              <p className="font-semibold text-blue-900 mb-2">Examples of ALE-covered expenses</p>
-              <ul className="text-sm space-y-2 ml-4 list-disc">
-                <li>Temporary housing (rental home, apartment, hotel)</li>
-                <li>Utilities not normally paid (if renting temporary)</li>
-                <li>Increased food and meals (above normal spending)</li>
-                <li>Laundry and clothing replacement (limited)</li>
-                <li>Pet boarding or kennel fees</li>
-              </ul>
-            </div>
-
-            <div className="bg-green-50 border-l-4 border-green-500 p-4 rounded">
-              <p className="font-semibold text-green-900 mb-2">What ALE does NOT cover</p>
-              <ul className="text-sm space-y-2 ml-4 list-disc">
-                <li>Rent or mortgage on original home</li>
-                <li>Personal luxury items</li>
-                <li>Childcare (separate coverage if available)</li>
-                <li>Entertainment or vacation expenses</li>
-              </ul>
-            </div>
-
-            <div className="bg-yellow-50 border-l-4 border-yellow-500 p-4 rounded">
-              <p className="font-semibold text-yellow-900 mb-2">Tips for ALE claims</p>
-              <ul className="text-sm space-y-2 ml-4 list-disc">
-                <li><strong>Document everything:</strong> Save all receipts for housing, meals, and incidentals</li>
-                <li><strong>Report promptly:</strong> Notify your insurer immediately about displacement</li>
-                <li><strong>Know your limit:</strong> Ask for your policy's ALE limit (often 20–30% of dwelling coverage)</li>
-                <li><strong>Submit regularly:</strong> File claims in monthly batches with supporting receipts</li>
-              </ul>
-            </div>
-          </div>
-        </div>
-        )}
-
-        {/* Help Section - Only show if insured */}
-        {userProfile?.hasInsurance && (
-        <div className="bg-blue-50 rounded-xl p-6 border border-blue-200">
-          <h3 className="font-semibold text-blue-900 mb-3">Need help with your claim?</h3>
-          <p className="text-blue-800 text-sm mb-4">
-            If you're unsure about coverage details, deductibles, or claim procedures, reach out to your insurance agent or the insurance company's claims department directly.
-          </p>
-          <div className="space-y-2 text-sm text-blue-800">
-            <p>
-              <strong>Tip:</strong> Keep a copy of your policy declaration page handy. It outlines your coverage limits and key details.
-            </p>
-          </div>
-        </div>
-        )}
+        </section>
       </div>
     </Layout>
   );
