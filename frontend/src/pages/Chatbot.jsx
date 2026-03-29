@@ -1,7 +1,7 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Send, Sparkles, Bot, User, Lightbulb } from 'lucide-react';
 import { Layout } from '../components/Layout';
-import { sendChatMessage } from '../services/routes';
+import { getChatHistory, getLatestChat, sendChatMessage } from '../services/routes';
 
 
 const starterPrompts = [
@@ -105,12 +105,50 @@ export default function Chatbot({ userProfile }) {
   const [conversationId, setConversationId] = useState(null);
   const userPhotoUrl = userProfile?.photoURL || null;
   const userId = userProfile?.uid || null;
+  const conversationStorageKey = userId ? `chatConversationId:${userId}` : null;
 
   const displayName = useMemo(() => {
     if (userProfile?.name) return userProfile.name;
     if (userProfile?.displayName) return userProfile.displayName;
     return 'there';
   }, [userProfile]);
+
+  useEffect(() => {
+    if (!userId || !conversationStorageKey) return;
+
+    const storedConversationId = window.localStorage.getItem(conversationStorageKey);
+
+    let isCancelled = false;
+    (async () => {
+      try {
+        let resolvedConversationId = storedConversationId;
+        let loadedMessages = [];
+
+        if (resolvedConversationId) {
+          const history = await getChatHistory({ userId, conversationId: resolvedConversationId });
+          loadedMessages = Array.isArray(history?.messages) ? history.messages : [];
+        }
+
+        if (!resolvedConversationId || !loadedMessages.length) {
+          const latest = await getLatestChat({ userId });
+          resolvedConversationId = latest?.conversationId || null;
+          loadedMessages = Array.isArray(latest?.messages) ? latest.messages : [];
+        }
+
+        if (!isCancelled && resolvedConversationId && loadedMessages.length) {
+          setConversationId(resolvedConversationId);
+          setMessages(loadedMessages);
+          window.localStorage.setItem(conversationStorageKey, resolvedConversationId);
+        }
+      } catch (error) {
+        console.error('Error loading chat history:', error);
+      }
+    })();
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [userId, conversationStorageKey]);
 
   const sendMessage = async (text) => {
     const content = text.trim();
@@ -169,6 +207,9 @@ export default function Chatbot({ userProfile }) {
 
       if (response?.conversationId) {
         setConversationId(response.conversationId);
+        if (conversationStorageKey) {
+          window.localStorage.setItem(conversationStorageKey, response.conversationId);
+        }
       }
 
       const replyContent = response?.reply?.content;

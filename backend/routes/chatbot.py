@@ -1,11 +1,14 @@
 import json
 import os
 import re
+import time
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from uuid import uuid4
 
 from dotenv import load_dotenv
 from flask import Blueprint, jsonify, request
+from firebase_admin import firestore
 from groq import Groq
 from pinecone import Pinecone
 import requests
@@ -36,6 +39,9 @@ JINA_DIMENSIONS = 1024
 GROQ_MODEL = 'llama-3.3-70b-versatile'
 API_URL = 'https://api.jina.ai/v1/embeddings'
 
+CHAT_RETENTION_MAX_MESSAGES = 200
+CHAT_RETENTION_MAX_AGE_DAYS = 30
+
 pc = Pinecone(api_key=PINECONE_API_KEY) if PINECONE_API_KEY else None
 client = Groq(api_key=GROQ_API_KEY) if GROQ_API_KEY else None
 
@@ -58,6 +64,268 @@ def extract_json(text):
             print('JSON decode failed:', e)
             return {'error': 'Malformed JSON', 'raw': json_str}
     return {'error': 'No JSON found', 'raw': text}
+
+
+def _conversation_doc_ref(user_id, conversation_id):
+    return db.collection('chatConversations').document(f'{user_id}:{conversation_id}')
+
+
+def _serialize_timestamp(value):
+    if hasattr(value, 'isoformat'):
+        try:
+            return value.isoformat()
+        except Exception:
+            return None
+    return None
+
+
+def _sort_messages_for_display(messages):
+    def role_priority(role):
+        return 0 if str(role or '') == 'user' else 1
+
+    return sorted(
+        messages,
+        key=lambda m: (
+            int(m.get('createdAtMs') or 0),
+            str(m.get('createdAt') or ''),
+            role_priority(m.get('role')),
+            str(m.get('id') or ''),
+        ),
+    )
+
+
+def _load_conversation_from_firestore(user_id, conversation_id, limit=40):
+    conv_ref = _conversation_doc_ref(user_id, conversation_id)
+    try:
+        docs = (
+            conv_ref.collection('messages')
+            .order_by('created_at', direction=firestore.Query.ASCENDING)
+            .limit(max(1, int(limit)))
+            .stream()
+        )
+
+        messages = []
+        for doc in docs:
+            payload = doc.to_dict() or {}
+            content = str(payload.get('content') or '').strip()
+            if not content:
+                continue
+            msg = {
+                'id': str(payload.get('id') or doc.id),
+                'role': str(payload.get('role') or 'assistant'),
+                'content': content,
+            }
+            if payload.get('created_at_ms') is not None:
+                try:
+                    msg['createdAtMs'] = int(payload.get('created_at_ms'))
+                except (TypeError, ValueError):
+                    pass
+            created_at = _serialize_timestamp(payload.get('created_at'))
+            if created_at:
+                msg['createdAt'] = created_at
+            messages.append(msg)
+
+        return _sort_messages_for_display(messages)
+    except Exception as e:
+        print(f'Error loading Firestore conversation: {e}')
+
+    # Fallback read path in case created_at ordering is unavailable for some docs.
+    try:
+        docs = conv_ref.collection('messages').limit(max(1, int(limit))).stream()
+        messages = []
+        for doc in docs:
+            payload = doc.to_dict() or {}
+            content = str(payload.get('content') or '').strip()
+            if not content:
+                continue
+            msg = {
+                'id': str(payload.get('id') or doc.id),
+                'role': str(payload.get('role') or 'assistant'),
+                'content': content,
+            }
+            if payload.get('created_at_ms') is not None:
+                try:
+                    msg['createdAtMs'] = int(payload.get('created_at_ms'))
+                except (TypeError, ValueError):
+                    pass
+            created_at = _serialize_timestamp(payload.get('created_at'))
+            if created_at:
+                msg['createdAt'] = created_at
+            messages.append(msg)
+
+        return _sort_messages_for_display(messages)
+    except Exception as fallback_error:
+        print(f'Error in Firestore fallback load: {fallback_error}')
+        return []
+
+
+def _persist_messages_to_firestore(user_id, conversation_id, messages):
+    if not messages:
+        return
+
+    try:
+        conv_ref = _conversation_doc_ref(user_id, conversation_id)
+
+        last_user = ''
+        last_assistant = ''
+        for msg in messages:
+            role = str(msg.get('role') or '')
+            content = str(msg.get('content') or '').strip()
+            if role == 'user' and content:
+                last_user = content
+            if role == 'assistant' and content:
+                last_assistant = content
+
+        conv_ref.set(
+            {
+                'user_id': user_id,
+                'conversation_id': conversation_id,
+                'updated_at': firestore.SERVER_TIMESTAMP,
+                'last_user_message': last_user[:300],
+                'last_assistant_message': last_assistant[:300],
+            },
+            merge=True,
+        )
+
+        batch = db.batch()
+        for msg in messages:
+            msg_ref = conv_ref.collection('messages').document(str(msg.get('id') or uuid4()))
+            batch.set(
+                msg_ref,
+                {
+                    'id': str(msg.get('id') or msg_ref.id),
+                    'role': str(msg.get('role') or 'assistant'),
+                    'content': str(msg.get('content') or ''),
+                    'created_at_ms': int(msg.get('created_at_ms') or 0),
+                    'created_at': firestore.SERVER_TIMESTAMP,
+                },
+                merge=True,
+            )
+        batch.commit()
+    except Exception as e:
+        print(f'Error persisting Firestore conversation: {e}')
+
+
+def _cleanup_conversation_messages(user_id, conversation_id, max_messages=CHAT_RETENTION_MAX_MESSAGES, max_age_days=CHAT_RETENTION_MAX_AGE_DAYS):
+    conv_ref = _conversation_doc_ref(user_id, conversation_id)
+
+    # 1) Age-based retention: remove messages older than max_age_days.
+    cutoff_dt = datetime.now(timezone.utc) - timedelta(days=max_age_days)
+    cutoff_ms = int(cutoff_dt.timestamp() * 1000)
+
+    try:
+        old_docs = list(
+            conv_ref.collection('messages')
+            .where('created_at_ms', '<', cutoff_ms)
+            .limit(500)
+            .stream()
+        )
+        if old_docs:
+            batch = db.batch()
+            for doc in old_docs:
+                batch.delete(doc.reference)
+            batch.commit()
+    except Exception as e:
+        print(f'Error cleaning old messages by created_at_ms: {e}')
+
+    # Fallback for legacy messages that may not have created_at_ms.
+    try:
+        old_docs_ts = list(
+            conv_ref.collection('messages')
+            .where('created_at', '<', cutoff_dt)
+            .limit(500)
+            .stream()
+        )
+        if old_docs_ts:
+            batch = db.batch()
+            for doc in old_docs_ts:
+                batch.delete(doc.reference)
+            batch.commit()
+    except Exception as e:
+        print(f'Error cleaning old messages by created_at: {e}')
+
+    # 2) Max-count retention: keep newest max_messages, delete the rest.
+    try:
+        docs_desc = list(
+            conv_ref.collection('messages')
+            .order_by('created_at_ms', direction=firestore.Query.DESCENDING)
+            .stream()
+        )
+        to_delete = docs_desc[max_messages:] if len(docs_desc) > max_messages else []
+        if to_delete:
+            batch = db.batch()
+            for doc in to_delete[:500]:
+                batch.delete(doc.reference)
+            batch.commit()
+    except Exception as e:
+        print(f'Error applying max-count cleanup by created_at_ms: {e}')
+
+    # Fallback max-count for legacy rows lacking created_at_ms.
+    try:
+        docs_desc_ts = list(
+            conv_ref.collection('messages')
+            .order_by('created_at', direction=firestore.Query.DESCENDING)
+            .stream()
+        )
+        to_delete = docs_desc_ts[max_messages:] if len(docs_desc_ts) > max_messages else []
+        if to_delete:
+            batch = db.batch()
+            for doc in to_delete[:500]:
+                batch.delete(doc.reference)
+            batch.commit()
+    except Exception as e:
+        print(f'Error applying max-count cleanup by created_at: {e}')
+
+
+def _build_scoped_chat_context(messages, max_messages=6, max_chars=700):
+    if not messages:
+        return []
+
+    prepared = []
+    for msg in messages[-max_messages:]:
+        role = str(msg.get('role') or 'assistant')
+        content = str(msg.get('content') or '').strip()
+        if not content:
+            continue
+        content = re.sub(r'\s+', ' ', content)
+        if len(content) > 220:
+            content = content[:217] + '...'
+        prepared.append({'role': role, 'content': content})
+
+    scoped = []
+    total_chars = 0
+    for msg in reversed(prepared):
+        size = len(msg['content'])
+        if total_chars + size > max_chars and scoped:
+            continue
+        scoped.append(msg)
+        total_chars += size
+
+    scoped.reverse()
+    return scoped
+
+
+def _load_latest_conversation_id_for_user(user_id):
+    try:
+        docs = (
+            db.collection('chatConversations')
+            .where('user_id', '==', user_id)
+            .order_by('updated_at', direction=firestore.Query.DESCENDING)
+            .limit(1)
+            .stream()
+        )
+        for doc in docs:
+            payload = doc.to_dict() or {}
+            conversation_id = str(payload.get('conversation_id') or '').strip()
+            if conversation_id:
+                return conversation_id
+            doc_id = str(doc.id or '')
+            if ':' in doc_id:
+                return doc_id.split(':', 1)[1]
+        return None
+    except Exception as e:
+        print(f'Error loading latest conversation id: {e}')
+        return None
 
 
 def _embed_text(text):
@@ -289,7 +557,7 @@ def _query_matches_with_location_fallback(index, vector, top_k=12, include_metad
     return [], 'no_matches'
 
 
-def generate_fire_response(user_query, ranking, intake_summary, recent_user_queries=None):
+def generate_fire_response(user_query, ranking, intake_summary, recent_user_queries=None, recent_chat_context=None):
     resources = ranking.get('top_resources', []) if isinstance(ranking, dict) else []
     if not resources:
         return (
@@ -362,6 +630,7 @@ def generate_fire_response(user_query, ranking, intake_summary, recent_user_quer
         'If heading is Job Recommendations, include concrete work/commute actions. '
         'If heading is Insurance Recommendations, include concrete claim actions for this week.\n\n'
         f'Recent user queries: {json.dumps(recent_user_queries or [], ensure_ascii=True)}\n\n'
+        f'Recent conversation context (scoped): {json.dumps(recent_chat_context or [], ensure_ascii=True)}\n\n'
         f'Selected response heading: {section_heading}\n\n'
         f'Intent hint: {intent_hint}\n\n'
         f'User query: {user_query}\n\n'
@@ -786,29 +1055,43 @@ def send_chat_message():
             'zip_code': zip_code or intake_summary.get('zip_code', ''),
         })
         key = f'{user_id}:{conversation_id}'
-        conversation = _conversation_store.get(key, [])
+        conversation = _load_conversation_from_firestore(user_id, conversation_id, limit=40)
+        if not conversation:
+            conversation = _conversation_store.get(key, [])
+
+        recent_chat_context = _build_scoped_chat_context(conversation, max_messages=6, max_chars=700)
         recent_user_queries = [
             m.get('content', '')
             for m in conversation
             if m.get('role') == 'user' and isinstance(m.get('content'), str)
         ][-3:]
 
-        assistant_text = generate_fire_response(message, ranking, intake_summary, recent_user_queries=recent_user_queries)
+        assistant_text = generate_fire_response(
+            message,
+            ranking,
+            intake_summary,
+            recent_user_queries=recent_user_queries,
+            recent_chat_context=recent_chat_context,
+        )
 
         user_message = {
             'id': f'user-{uuid4()}',
             'role': 'user',
             'content': message,
+            'created_at_ms': int(time.time() * 1000),
         }
         assistant_message = {
             'id': f'assistant-{uuid4()}',
             'role': 'assistant',
             'content': assistant_text,
+            'created_at_ms': int(time.time() * 1000) + 1,
         }
 
         conversation.append(user_message)
         conversation.append(assistant_message)
-        _conversation_store[key] = conversation
+        _conversation_store[key] = conversation[-40:]
+        _persist_messages_to_firestore(user_id, conversation_id, [user_message, assistant_message])
+        _cleanup_conversation_messages(user_id, conversation_id)
 
         return jsonify({
             'conversationId': conversation_id,
@@ -823,6 +1106,10 @@ def send_chat_message():
                 'county': county,
                 'zip_code': zip_code,
                 'ranking': ranking,
+                'history': {
+                    'source': 'firestore',
+                    'scoped_messages_used': len(recent_chat_context),
+                },
             },
         }), 200
 
@@ -842,7 +1129,9 @@ def get_chat_history(conversation_id):
             return auth_error
 
         key = f'{user_id}:{conversation_id}'
-        messages = _conversation_store.get(key, [])
+        messages = _load_conversation_from_firestore(user_id, conversation_id, limit=200)
+        if not messages:
+            messages = _conversation_store.get(key, [])
 
         return jsonify({
             'conversationId': conversation_id,
@@ -851,4 +1140,29 @@ def get_chat_history(conversation_id):
 
     except Exception as e:
         print(f'Error in get_chat_history: {e}')
+        return jsonify({'error': str(e)}), 500
+
+
+@chatbot_bp.route('/chat/latest', methods=['GET', 'OPTIONS'])
+def get_latest_chat():
+    if request.method == 'OPTIONS':
+        return '', 204
+
+    try:
+        user_id, auth_error = get_user_id()
+        if auth_error:
+            return auth_error
+
+        conversation_id = _load_latest_conversation_id_for_user(user_id)
+        if not conversation_id:
+            return jsonify({'conversationId': None, 'messages': []}), 200
+
+        messages = _load_conversation_from_firestore(user_id, conversation_id, limit=200)
+        key = f'{user_id}:{conversation_id}'
+        if not messages:
+            messages = _conversation_store.get(key, [])
+
+        return jsonify({'conversationId': conversation_id, 'messages': messages}), 200
+    except Exception as e:
+        print(f'Error in get_latest_chat: {e}')
         return jsonify({'error': str(e)}), 500

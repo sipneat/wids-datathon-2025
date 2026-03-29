@@ -102,3 +102,7 @@ export async function sendChatMessage({ userId, message, context = {}, conversat
 export async function getChatHistory({ userId, conversationId }) {
   return requestJson(`/chat/history/${conversationId}`, { userId });
 }
+
+export async function getLatestChat({ userId }) {
+  return requestJson('/chat/latest', { userId });
+}
