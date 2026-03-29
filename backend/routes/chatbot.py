@@ -92,7 +92,6 @@ def _query_matches(index, vector, top_k=12, include_metadata=True):
         'general',
         'housing',
         'insurance',
-        'school',
         'transport',
         'health',
     ]
@@ -222,7 +221,6 @@ def _build_intake_summary(context):
         'county': profile.get('county') or '',
         'zip_code': profile.get('zipCode') or profile.get('zip_code') or '',
         'needs_housing': bool(profile.get('needsHousing')),
-        'needs_employment': bool(profile.get('needsEmployment')),
         'has_children': bool(profile.get('hasChildren')),
         'has_insurance': bool(profile.get('hasInsurance')),
         'insurance_claim_status': profile.get('insuranceClaimStatus') or '',
@@ -240,7 +238,6 @@ def _query_matches_with_location_fallback(index, vector, top_k=12, include_metad
         'general',
         'housing',
         'insurance',
-        'school',
         'transport',
         'health',
     ]

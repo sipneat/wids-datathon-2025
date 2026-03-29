@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Layout } from '../components/Layout';
-import { Home, MapPin, DollarSign, Calendar, Search, ExternalLink, Phone, Heart, Bed, Bath, Maximize, Filter, AlertCircle, Briefcase, Activity, Users } from 'lucide-react';
+import { Home, MapPin, DollarSign, Calendar, Search, ExternalLink, Phone, Heart, Bed, Bath, Maximize, Filter, AlertCircle, Activity, Users } from 'lucide-react';
 
 export default function Housing({ userProfile }) {
   const [searchZip, setSearchZip] = useState('');
@@ -10,14 +10,12 @@ export default function Housing({ userProfile }) {
   const [houses, setHouses] = useState([]);
   const [loading, setLoading] = useState(false);
   const [filters, setFilters] = useState({
-    maxCommute: 30, // minutes
     accessibility: false,
     petFriendly: false,
     nearHealth: false
   });
 
   // Determine user's housing situation from profile data
-  const hasJob = !userProfile?.needsEmployment;
   const needsRelocation = !!userProfile?.needsHousing;
   const hasHealthConcerns = false; // Could be derived from additional intake questions
   const needsAccessibility = (userProfile?.caregivingNeeds || []).length > 0 || userProfile?.hasDisabilities;
@@ -27,7 +25,7 @@ export default function Housing({ userProfile }) {
   // Mock backend call to fetch housing based on user's situation
   useEffect(() => {
     fetchHousingOptions();
-  }, [filters, hasJob, needsRelocation]);
+  }, [filters, needsRelocation]);
 
   const fetchHousingOptions = async () => {
     setLoading(true);
@@ -35,13 +33,6 @@ export default function Housing({ userProfile }) {
     await new Promise(resolve => setTimeout(resolve, 500));
     
     let filteredHouses = [...temporaryHousing, ...permanentHousing];
-    
-    // Apply commute-based filtering if user has job
-    if (hasJob && filters.maxCommute) {
-      filteredHouses = filteredHouses.filter(house => 
-        house.commuteTime ? house.commuteTime <= filters.maxCommute : true
-      );
-    }
     
     // Apply health radius logic
     if (filters.nearHealth || hasHealthConcerns) {
@@ -109,7 +100,7 @@ export default function Housing({ userProfile }) {
       bathrooms: 2,
       sqft: 1100,
       available: 'Feb 1, 2026',
-      features: ['Pet-friendly', 'Near schools', 'Parking included', 'Laundry in unit'],
+      features: ['Pet-friendly', 'Parking included', 'Laundry in unit'],
       lat: 34.0983,
       lng: -118.3267,
       image: 'https://images.unsplash.com/photo-1522708323590-d24dbb6b0267?w=400',
@@ -166,7 +157,7 @@ export default function Housing({ userProfile }) {
       bathrooms: 2.5,
       sqft: 1450,
       available: 'Available Now',
-      features: ['Balcony', 'Central AC', 'Dishwasher', 'Walking distance to schools'],
+      features: ['Balcony', 'Central AC', 'Dishwasher'],
       lat: 34.1425,
       lng: -118.2551,
       image: 'https://images.unsplash.com/photo-1502672260266-1c1ef2d93688?w=400',
@@ -192,15 +183,6 @@ export default function Housing({ userProfile }) {
         message: 'We recommend completing your financial assessment first to better understand your housing budget.',
         type: 'warning',
         icon: AlertCircle
-      };
-    }
-    
-    if (hasJob && !needsRelocation) {
-      return {
-        title: 'Temporary Housing Near Your Job',
-        message: 'Finding housing close to your current workplace will help you maintain employment continuity.',
-        type: 'info',
-        icon: Briefcase
       };
     }
     
@@ -261,9 +243,7 @@ export default function Housing({ userProfile }) {
             <h1 className="text-3xl font-bold">Housing Assistance</h1>
           </div>
           <p className="text-green-50 text-lg">
-            {hasJob && !needsRelocation 
-              ? 'Find temporary housing close to your workplace'
-              : needsRelocation && hasInsurance
+            {needsRelocation && hasInsurance
               ? 'Temporary housing while your home is being rebuilt'
               : 'Find housing options tailored to your situation'}
           </p>
@@ -295,39 +275,6 @@ export default function Housing({ userProfile }) {
             </div>
           </div>
         </div>
-
-        {/* Priority Checklist for Job Holders */}
-        {hasJob && !needsRelocation && (
-          <div className="bg-white rounded-xl shadow-sm p-6 border border-gray-200">
-            <h2 className="text-xl font-semibold text-gray-800 mb-4 flex items-center space-x-2">
-              <Briefcase className="w-5 h-5 text-green-600" />
-              <span>Your Housing Continuity Checklist</span>
-            </h2>
-            <div className="space-y-3">
-              <div className="flex items-start space-x-3 p-3 bg-green-50 rounded-lg">
-                <input type="checkbox" className="mt-1 w-5 h-5 text-green-600" />
-                <div>
-                  <p className="font-medium text-gray-800">Find housing within {filters.maxCommute} min commute</p>
-                  <p className="text-sm text-gray-600">Keep your job by staying close to work</p>
-                </div>
-              </div>
-              <div className="flex items-start space-x-3 p-3 bg-blue-50 rounded-lg">
-                <input type="checkbox" className="mt-1 w-5 h-5 text-blue-600" />
-                <div>
-                  <p className="font-medium text-gray-800">Apply for short-term rental (3-6 months)</p>
-                  <p className="text-sm text-gray-600">Flexibility while you assess long-term options</p>
-                </div>
-              </div>
-              <div className="flex items-start space-x-3 p-3 bg-purple-50 rounded-lg">
-                <input type="checkbox" className="mt-1 w-5 h-5 text-purple-600" />
-                <div>
-                  <p className="font-medium text-gray-800">Contact FEMA for temporary housing assistance</p>
-                  <p className="text-sm text-gray-600">Financial support may be available</p>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
 
         {/* Relocation Support for Home Loss */}
         {needsRelocation && homeBurned && hasInsurance && (
@@ -365,23 +312,6 @@ export default function Housing({ userProfile }) {
             <span>Filter Your Search</span>
           </h3>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-            {hasJob && (
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Max Commute Time
-                </label>
-                <select 
-                  value={filters.maxCommute}
-                  onChange={(e) => setFilters({...filters, maxCommute: parseInt(e.target.value)})}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500"
-                >
-                  <option value={15}>15 min</option>
-                  <option value={30}>30 min</option>
-                  <option value={45}>45 min</option>
-                  <option value={60}>60 min</option>
-                </select>
-              </div>
-            )}
             <div>
               <label className="flex items-center space-x-2 cursor-pointer">
                 <input 
@@ -490,9 +420,7 @@ export default function Housing({ userProfile }) {
           <div className="flex items-center justify-between mb-6">
             <div>
               <h2 className="text-2xl font-semibold text-gray-800">
-                {hasJob && !needsRelocation ? 'Commute-Friendly Housing' : 
-                 needsRelocation ? 'Housing Options for Your Situation' : 
-                 'Available Housing'}
+                {needsRelocation ? 'Housing Options for Your Situation' : 'Available Housing'}
               </h2>
               <p className="text-gray-600 mt-1">
                 {loading ? 'Loading personalized options...' : 
@@ -554,16 +482,6 @@ export default function Housing({ userProfile }) {
                       <MapPin className="w-4 h-4" />
                       <span className="text-sm">{housing.address}</span>
                     </p>
-
-                    {/* Commute Time Badge */}
-                    {hasJob && housing.commuteTime && (
-                      <div className="mb-3">
-                        <span className="inline-flex items-center space-x-1 px-3 py-1 bg-green-100 text-green-700 text-sm rounded-full">
-                          <Briefcase className="w-3 h-3" />
-                          <span>{housing.commuteTime} min commute</span>
-                        </span>
-                      </div>
-                    )}
 
                     {/* Accessibility & Health Badges */}
                     <div className="flex flex-wrap gap-2 mb-3">
