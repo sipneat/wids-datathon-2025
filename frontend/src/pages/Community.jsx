@@ -29,7 +29,7 @@ export default function Community({ userProfile }) {
     { id: 'general', name: 'General Discussion', icon: MessageSquare, count: 45 },
     { id: 'housing', name: 'Housing & Shelter', icon: Users, count: 32 },
     { id: 'insurance', name: 'Insurance Help', icon: HelpCircle, count: 28 },
-    { id: 'schools', name: 'Schools & Childcare', icon: Users, count: 15 },
+    { id: 'schools', name: 'Schools & Youth Support', icon: Users, count: 15 },
     { id: 'resources', name: 'Resources & Aid', icon: TrendingUp, count: 41 },
     { id: 'emotional', name: 'Emotional Support', icon: MessageSquare, count: 23 }
   ];
