@@ -167,14 +167,7 @@ export default function Dashboard({ userProfile: initialUserProfile }) {
       link: '/employment',
       priority: 'medium'
     },
-    userProfile?.hasChildren && {
-      id: 'childcare',
-      icon: Baby,
-      title: 'Childcare Services',
-      description: 'Access childcare and family support',
-      link: '/childcare',
-      priority: 'medium'
-    }
+    
   ].filter(Boolean);
 
   return (
@@ -311,10 +304,6 @@ export default function Dashboard({ userProfile: initialUserProfile }) {
                 <div className="dashboard-resource-item">
                   <CheckCircle className="w-6 h-6 text-green-600" />
                   <span className="font-medium text-gray-800">School Enrollment Support</span>
-                </div>
-                <div className="dashboard-resource-item">
-                  <CheckCircle className="w-6 h-6 text-green-600" />
-                  <span className="font-medium text-gray-800">Childcare Resources</span>
                 </div>
               </>
             )}

@@ -425,7 +425,6 @@ export default function Insurance({ userProfile }) {
               <ul className="text-sm space-y-2 ml-4 list-disc">
                 <li>Rent or mortgage on original home</li>
                 <li>Personal luxury items</li>
-                <li>Childcare (separate coverage if available)</li>
                 <li>Entertainment or vacation expenses</li>
               </ul>
             </div>

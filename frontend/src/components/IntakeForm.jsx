@@ -35,7 +35,7 @@ export const IntakeForm = ({ onComplete }) => {
         county: `Great. County-level context helps us localize wildfire recovery guidance.`,
         zip_code: `Perfect. ZIP-level detail helps us narrow nearby options when available.`,
         hasChildren: value === 'Yes'
-          ? `Understood. We’ll include school and childcare resources.`
+          ? `Understood. We’ll include school resources.`
           : `Okay. We’ll focus on your specific recovery needs.`,
         displacement_status: `Thanks. We’ll align guidance to your displacement stage (${value}).`,
         income_change: `Thanks. We’ll prioritize resources for your income change (${value}).`,
