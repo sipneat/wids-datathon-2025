@@ -64,7 +64,7 @@ export const INTAKE_QUESTIONS = [
     id: 'income_change',
     question: 'Has your income changed due to the fire?',
     type: 'radio',
-    options: ['No change', 'Reduced hours', 'Temporarily laid off', 'Job lost', 'Self-employed revenue loss'],
+    options: ['No change', 'Reduced income', 'Temporary income loss', 'Major income loss', 'Unsure'],
     aiPrompt: 'Tell me about any income changes'
   },
   {
@@ -73,14 +73,6 @@ export const INTAKE_QUESTIONS = [
     type: 'radio',
     options: ['Yes', 'No'],
     aiPrompt: 'Do you have any children or dependents?'
-  },
-  {
-    id: 'school_status',
-    question: "What is your children's current school status?",
-    type: 'radio',
-    options: ['No disruption', 'Enrolled but disrupted', 'Transferring', 'Online/temporary'],
-    showIf: (resp) => resp.hasChildren === 'Yes',
-    aiPrompt: "Tell me about your children's school status"
   },
   {
     id: 'hasInsurance',
@@ -129,9 +121,6 @@ export function buildProfileFromResponses(responses = {}) {
     return zip || null;
   };
 
-  const needsEmployment = ['Reduced hours', 'Temporarily laid off', 'Job lost', 'Self-employed revenue loss'].includes(
-    responses.income_change || ''
-  );
   const needsHousing = ['Evacuated', 'Relocated temporarily'].includes(responses.displacement_status || '');
 
   return {
@@ -154,7 +143,6 @@ export function buildProfileFromResponses(responses = {}) {
       return null;
     })(),
     needsHousing,
-    needsEmployment,
     hasInsurance: typeof responses.hasInsurance === 'string' ? responses.hasInsurance.includes('Yes') : false,
     insuranceType: responses.hasInsurance,
     insuranceClaimStatus: responses.insurance_claim_status,

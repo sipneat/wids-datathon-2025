@@ -1,4 +1,4 @@
-import { Calendar, TrendingUp, DollarSign, School } from 'lucide-react';
+import { Calendar, TrendingUp, DollarSign } from 'lucide-react';
 import { ResourceCard } from '../components/ResourceCard';
 import { Layout } from '../components/Layout';
 
@@ -57,23 +57,6 @@ export default function Resources({ userProfile }) {
     }
   ];
 
-  const schoolData = [
-    {
-      label: 'Nearby Schools Accepting Transfers',
-      value: '12 schools within 10 miles',
-      description: 'Expedited enrollment available for displaced students'
-    },
-    {
-      label: 'Temporary School Sites',
-      value: '3 locations operational',
-      description: 'Portable classrooms and community center partnerships'
-    },
-    {
-      label: 'Counseling Support',
-      value: 'Available at all locations',
-      description: 'Trauma-informed care and academic transition support'
-    }
-  ];
 
   return (
     <Layout userProfile={userProfile}>
@@ -104,14 +87,6 @@ export default function Resources({ userProfile }) {
             type="financial"
             icon={DollarSign}
           />
-          {userProfile?.hasChildren && (
-            <ResourceCard
-              title="School Information"
-              data={schoolData}
-              type="school"
-              icon={School}
-            />
-          )}
         </div>
 
         {/* Additional Resources */}

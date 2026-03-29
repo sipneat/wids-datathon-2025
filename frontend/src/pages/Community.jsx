@@ -29,7 +29,6 @@ export default function Community({ userProfile }) {
     { id: 'general', name: 'General Discussion', icon: MessageSquare, count: 45 },
     { id: 'housing', name: 'Housing & Shelter', icon: Users, count: 32 },
     { id: 'insurance', name: 'Insurance Help', icon: HelpCircle, count: 28 },
-    { id: 'schools', name: 'Schools & Youth Support', icon: Users, count: 15 },
     { id: 'resources', name: 'Resources & Aid', icon: TrendingUp, count: 41 },
     { id: 'emotional', name: 'Emotional Support', icon: MessageSquare, count: 23 }
   ];
@@ -41,12 +40,6 @@ export default function Community({ userProfile }) {
       answer: 'You can apply for FEMA assistance online at DisasterAssistance.gov, by phone at 1-800-621-3362, or through the FEMA mobile app. You\'ll need your address, insurance information, and details about your losses.',
       category: 'Financial Aid',
       helpfulCount: 47
-    },
-    {
-      question: 'What documents do I need for school enrollment?',
-      answer: 'Most schools are being flexible with displaced students. Typically needed: proof of residence (even temporary), birth certificate or ID, and immunization records. Many schools will accept these documents later if you don\'t have them immediately.',
-      category: 'Schools',
-      helpfulCount: 35
     },
     {
       question: 'Can I get temporary housing assistance?',
@@ -101,17 +94,6 @@ export default function Community({ userProfile }) {
         },
         {
           id: 2,
-          user: 'James K.',
-          region: 'Altadena',
-          thread: 'schools',
-          time: '5 hours ago',
-          content: 'For parents looking for schools: Pacific Elementary is accepting displaced students with expedited enrollment. They\'ve been very understanding about missing documents. The counselor there, Ms. Rodriguez, is amazing.',
-          tags: ['Schools', 'Children'],
-          isPinned: false,
-          replies: []
-        },
-        {
-          id: 3,
           user: 'Linda P.',
           region: 'Malibu',
           thread: 'insurance',
