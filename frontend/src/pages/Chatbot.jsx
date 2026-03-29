@@ -5,9 +5,8 @@ import { getChatHistory, getLatestChat, sendChatMessage } from '../services/rout
 
 
 const starterPrompts = [
-  'I was displaced and still need to get to work. What should I do first?',
   'My insurance claim is pending. What can I do this week?',
-  'I need temporary housing under $1800/month near schools.',
+  'I need temporary housing under $1800/month.',
   'I have caregiving responsibilities and need accessible housing options.'
 ];
 
@@ -16,7 +15,7 @@ const initialMessages = [
     id: 'welcome',
     role: 'assistant',
     content:
-      'I am your Recovery Assistant. Ask me about housing, insurance, school continuity, or financial next steps.'
+      'I am your Recovery Assistant. Ask me about housing, insurance, or financial next steps.'
   }
 ];
 
@@ -185,7 +184,6 @@ export default function Chatbot({ userProfile }) {
         zipCode: userProfile?.zipCode || null,
         hasChildren: Boolean(userProfile?.hasChildren),
         needsHousing: Boolean(userProfile?.needsHousing),
-        needsEmployment: Boolean(userProfile?.needsEmployment),
         hasInsurance: Boolean(userProfile?.hasInsurance),
         insuranceType: userProfile?.insuranceType || null,
         insuranceClaimStatus: userProfile?.insuranceClaimStatus || null,
@@ -358,7 +356,7 @@ export default function Chatbot({ userProfile }) {
                   <input
                     value={input}
                     onChange={(e) => setInput(e.target.value)}
-                    placeholder="Ask about housing, insurance, school transitions, or recovery timelines..."
+                    placeholder="Ask about housing, insurance, or recovery timelines..."
                     className="flex-1 px-4 py-3 rounded-xl border border-gray-300 focus:outline-none focus:ring-2 focus:ring-emerald-500"
                   />
                   <button

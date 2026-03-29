@@ -1,117 +1,109 @@
-import { Calendar, TrendingUp, DollarSign, School } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
+import { Calendar, TrendingUp, DollarSign } from 'lucide-react';
 import { ResourceCard } from '../components/ResourceCard';
 import { Layout } from '../components/Layout';
+import { getResourceInsights } from '../services/routes';
 
 export default function Resources({ userProfile }) {
-  const recoveryData = [
-    {
-      label: 'Estimated Return Home Date',
-      value: 'March 15 - April 30, 2026',
-      description: 'Based on infrastructure rebuilding timelines in your area'
-    },
-    {
-      label: 'Neighborhood Access',
-      value: 'Limited - Escorted visits only',
-      description: 'Safety inspections in progress, full access expected in 4-6 weeks'
-    },
-    {
-      label: 'Rebuilding Permit Status',
-      value: 'Applications opening February 1',
-      description: 'Expedited processing available for fire-affected properties'
-    }
-  ];
+  const [insights, setInsights] = useState({
+    recoveryTimeline: [],
+    impactAssessment: [],
+    financialInsights: []
+  });
+  const [insightSource, setInsightSource] = useState('');
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState('');
+  const lastFetchRef = useRef(null);
+  const inFlightRef = useRef(false);
 
-  const impactData = [
-    {
-      label: 'Area Fire Severity',
-      value: 'High Impact Zone',
-      description: '87% of structures affected in your neighborhood'
-    },
-    {
-      label: 'Historical Fire Risk',
-      value: 'Elevated',
-      description: '3 major fires in the past 15 years within 5-mile radius'
-    },
-    {
-      label: 'Recovery Progress',
-      value: '23% Complete',
-      description: 'Utilities: Partial | Roads: 60% | Services: Limited'
+  useEffect(() => {
+    if (!userProfile?.uid) {
+      setIsLoading(false);
+      return;
     }
-  ];
 
-  const financialData = [
-    {
-      label: 'Average Insurance Payout Timeline',
-      value: '4-6 months',
-      description: 'For similar wildfire claims in California (2023-2024 data)'
-    },
-    {
-      label: 'FEMA Assistance Average',
-      value: '$8,500 - $15,000',
-      description: 'Temporary housing and immediate needs assistance'
-    },
-    {
-      label: 'Rebuilding Cost Estimate',
-      value: '$350-450 per sq ft',
-      description: 'Current construction costs in affected regions'
-    }
-  ];
+    const loadInsights = async () => {
+      if (inFlightRef.current && lastFetchRef.current === userProfile.uid) {
+        return;
+      }
+      inFlightRef.current = true;
+      lastFetchRef.current = userProfile.uid;
+      setIsLoading(true);
+      setError('');
+      try {
+        const data = await getResourceInsights({ userId: userProfile.uid });
+        setInsights({
+          recoveryTimeline: data?.recoveryTimeline || [],
+          impactAssessment: data?.impactAssessment || [],
+          financialInsights: data?.financialInsights || []
+        });
+        setInsightSource(data?.insightSource || '');
+      } catch (err) {
+        console.error('Error loading resource insights:', err);
+        setError('Unable to load AI insights right now. Please refresh.');
+      } finally {
+        inFlightRef.current = false;
+        setIsLoading(false);
+      }
+    };
 
-  const schoolData = [
-    {
-      label: 'Nearby Schools Accepting Transfers',
-      value: '12 schools within 10 miles',
-      description: 'Expedited enrollment available for displaced students'
-    },
-    {
-      label: 'Temporary School Sites',
-      value: '3 locations operational',
-      description: 'Portable classrooms and community center partnerships'
-    },
-    {
-      label: 'Counseling Support',
-      value: 'Available at all locations',
-      description: 'Trauma-informed care and academic transition support'
-    }
-  ];
+    loadInsights();
+  }, [userProfile?.uid]);
+
 
   return (
     <Layout userProfile={userProfile}>
       <div className="max-w-6xl mx-auto space-y-6">
         {/* Header */}
         <div className="bg-white rounded-xl shadow-sm p-6">
-          <h2 className="text-2xl font-semibold text-gray-800 mb-2">Recovery Resources & Insights</h2>
-          <p className="text-gray-600">Data-driven insights to help you plan your recovery journey</p>
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h2 className="text-2xl font-semibold text-gray-800 mb-2">Recovery Resources & Insights</h2>
+              <p className="text-gray-600">Data-driven insights to help you plan your recovery journey</p>
+            </div>
+            {insightSource && (
+              <span className={`px-3 py-1 rounded-full text-xs font-semibold ${
+                insightSource === 'ai'
+                  ? 'bg-green-100 text-green-700'
+                  : 'bg-amber-100 text-amber-700'
+              }`}>
+                {insightSource === 'ai' ? 'AI-generated' : 'Fallback insights'}
+              </span>
+            )}
+          </div>
         </div>
+
+        {isLoading && (
+          <div className="bg-white rounded-xl shadow-sm p-6">
+            <p className="text-gray-600">Loading AI insights...</p>
+          </div>
+        )}
+        {error && !isLoading && (
+          <div className="bg-red-50 border border-red-200 rounded-xl p-4">
+            <p className="text-red-800 text-sm">{error}</p>
+          </div>
+        )}
 
         {/* Resource Cards Grid */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           <ResourceCard
             title="Recovery Timeline"
-            data={recoveryData}
+            data={insights.recoveryTimeline}
             type="timeline"
             icon={Calendar}
           />
           <ResourceCard
             title="Impact Assessment"
-            data={impactData}
+            data={insights.impactAssessment}
             type="impact"
             icon={TrendingUp}
           />
           <ResourceCard
             title="Financial Insights"
-            data={financialData}
+            data={insights.financialInsights}
             type="financial"
             icon={DollarSign}
           />
-          {userProfile?.hasChildren && (
-            <ResourceCard
-              title="School Information"
-              data={schoolData}
-              type="school"
-              icon={School}
-            />
-          )}
         </div>
 
         {/* Additional Resources */}

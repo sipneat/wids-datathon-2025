@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Layout } from '../components/Layout';
-import { Home as HomeIcon, School, Baby, DollarSign, MapPin, Briefcase, CheckCircle, AlertCircle } from 'lucide-react';
+import { Home as HomeIcon, DollarSign, MapPin, CheckCircle, AlertCircle } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { auth } from '../services/firebase';
 import { getUserIntake, submitIntake } from '../services/routes';
@@ -143,14 +143,6 @@ export default function Dashboard({ userProfile: initialUserProfile }) {
       link: '/housing',
       priority: 'high'
     },
-    userProfile?.hasChildren && {
-      id: 'school-enrollment',
-      icon: School,
-      title: 'Enroll Children in School',
-      description: 'Get help with school enrollment and transfers',
-      link: '/schools',
-      priority: 'high'
-    },
     {
       id: 'insurance-claim',
       icon: DollarSign,
@@ -159,22 +151,7 @@ export default function Dashboard({ userProfile: initialUserProfile }) {
       link: '/insurance',
       priority: 'high'
     },
-    userProfile?.needsEmployment && {
-      id: 'employment',
-      icon: Briefcase,
-      title: 'Employment Support',
-      description: 'Find job placement and career resources',
-      link: '/employment',
-      priority: 'medium'
-    },
-    userProfile?.hasChildren && {
-      id: 'childcare',
-      icon: Baby,
-      title: 'Childcare Services',
-      description: 'Access childcare and family support',
-      link: '/childcare',
-      priority: 'medium'
-    }
+    
   ].filter(Boolean);
 
   return (
@@ -306,28 +283,10 @@ export default function Dashboard({ userProfile: initialUserProfile }) {
                 <span className="font-medium text-gray-800">Housing Assistance</span>
               </div>
             )}
-            {userProfile?.hasChildren && (
-              <>
-                <div className="dashboard-resource-item">
-                  <CheckCircle className="w-6 h-6 text-green-600" />
-                  <span className="font-medium text-gray-800">School Enrollment Support</span>
-                </div>
-                <div className="dashboard-resource-item">
-                  <CheckCircle className="w-6 h-6 text-green-600" />
-                  <span className="font-medium text-gray-800">Childcare Resources</span>
-                </div>
-              </>
-            )}
             <div className="dashboard-resource-item">
               <CheckCircle className="w-6 h-6 text-green-600" />
               <span className="font-medium text-gray-800">Insurance Guidance</span>
             </div>
-            {userProfile?.needsEmployment && (
-              <div className="dashboard-resource-item">
-                <CheckCircle className="w-6 h-6 text-green-600" />
-                <span className="font-medium text-gray-800">Employment Services</span>
-              </div>
-            )}
             <div className="dashboard-resource-item">
               <CheckCircle className="w-6 h-6 text-green-600" />
               <span className="font-medium text-gray-800">Community Support</span>

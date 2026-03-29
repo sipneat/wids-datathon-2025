@@ -136,3 +136,56 @@ export async function deleteInsuranceDocument({ userId, documentId }) {
     userId
   });
 }
+
+export async function getCommunityPosts({ userId, region = null, thread = null }) {
+  const params = new URLSearchParams();
+  if (region) params.set('region', region);
+  if (thread) params.set('thread', thread);
+  const query = params.toString();
+  const path = query ? `/community/posts?${query}` : '/community/posts';
+  return requestJson(path, { userId });
+}
+
+export async function getResourceInsights({ userId }) {
+  return requestJson('/resources/insights', { userId });
+}
+
+export async function getZillowListings({ userId, zipcode, state, city }) {
+  const params = new URLSearchParams();
+  if (zipcode) params.set('zipcode', zipcode);
+  if (state) params.set('state', state);
+  if (city) params.set('city', city);
+  const query = params.toString();
+  const path = query ? `/housing/zillow?${query}` : '/housing/zillow';
+  return requestJson(path, { userId });
+}
+
+export async function createCommunityPost({ userId, payload }) {
+  return requestJson('/community/posts', {
+    method: 'POST',
+    userId,
+    body: payload
+  });
+}
+
+export async function createCommunityReply({ userId, postId, payload }) {
+  return requestJson(`/community/posts/${postId}/replies`, {
+    method: 'POST',
+    userId,
+    body: payload
+  });
+}
+
+export async function deleteCommunityPost({ userId, postId }) {
+  return requestJson(`/community/posts/${postId}`, {
+    method: 'DELETE',
+    userId
+  });
+}
+
+export async function deleteCommunityReply({ userId, postId, replyId }) {
+  return requestJson(`/community/posts/${postId}/replies/${replyId}`, {
+    method: 'DELETE',
+    userId
+  });
+}

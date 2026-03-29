@@ -156,3 +156,96 @@ class ActionStatusUpdateResponse:
 
 def serialize_document(data: Dict[str, Any]) -> Dict[str, Any]:
     return _serialize(data)
+
+
+@dataclass
+class CommunityPostCreateRequest:
+    region: str
+    thread: str
+    content: str
+    tags: list = field(default_factory=list)
+    userDisplayName: Optional[str] = None
+
+    @classmethod
+    def from_payload(cls, payload: Dict[str, Any]) -> "CommunityPostCreateRequest":
+        if not isinstance(payload, dict):
+            raise ValueError("No data provided")
+        region = payload.get("region")
+        thread = payload.get("thread")
+        content = payload.get("content")
+        if not region or not thread or not content:
+            raise ValueError("Missing required fields")
+        tags = payload.get("tags") or []
+        if not isinstance(tags, list):
+            tags = []
+        return cls(
+            region=region,
+            thread=thread,
+            content=content,
+            tags=tags,
+            userDisplayName=payload.get("userDisplayName"),
+        )
+
+
+@dataclass
+class CommunityPostRecord:
+    userId: str
+    userDisplayName: str
+    region: str
+    thread: str
+    content: str
+    tags: list
+    createdAt: datetime
+
+    @classmethod
+    def from_request(cls, user_id: str, req: CommunityPostCreateRequest) -> "CommunityPostRecord":
+        return cls(
+            userId=user_id,
+            userDisplayName=req.userDisplayName or "Anonymous",
+            region=req.region,
+            thread=req.thread,
+            content=req.content,
+            tags=req.tags,
+            createdAt=utcnow(),
+        )
+
+    def to_firestore(self) -> Dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass
+class CommunityReplyCreateRequest:
+    content: str
+    userDisplayName: Optional[str] = None
+
+    @classmethod
+    def from_payload(cls, payload: Dict[str, Any]) -> "CommunityReplyCreateRequest":
+        if not isinstance(payload, dict):
+            raise ValueError("No data provided")
+        content = payload.get("content")
+        if not content:
+            raise ValueError("Missing required fields")
+        return cls(
+            content=content,
+            userDisplayName=payload.get("userDisplayName"),
+        )
+
+
+@dataclass
+class CommunityReplyRecord:
+    userId: str
+    userDisplayName: str
+    content: str
+    createdAt: datetime
+
+    @classmethod
+    def from_request(cls, user_id: str, req: CommunityReplyCreateRequest) -> "CommunityReplyRecord":
+        return cls(
+            userId=user_id,
+            userDisplayName=req.userDisplayName or "Anonymous",
+            content=req.content,
+            createdAt=utcnow(),
+        )
+
+    def to_firestore(self) -> Dict[str, Any]:
+        return asdict(self)
