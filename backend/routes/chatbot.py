@@ -289,7 +289,7 @@ def _query_matches_with_location_fallback(index, vector, top_k=12, include_metad
     return [], 'no_matches'
 
 
-def generate_fire_response(user_query, ranking, intake_summary):
+def generate_fire_response(user_query, ranking, intake_summary, recent_user_queries=None):
     resources = ranking.get('top_resources', []) if isinstance(ranking, dict) else []
     if not resources:
         return (
@@ -302,22 +302,72 @@ def generate_fire_response(user_query, ranking, intake_summary):
             [r.get('title') or r.get('id') for r in resources]
         )
 
+    query_lc = (user_query or '').lower()
+    if any(token in query_lc for token in ['insurance', 'claim', 'adjuster', 'deductible', 'policy']):
+        intent_hint = 'insurance'
+    elif any(token in query_lc for token in ['work', 'job', 'commute', 'employment']):
+        intent_hint = 'employment_and_commute'
+    elif any(token in query_lc for token in ['housing', 'shelter', 'rent', 'apartment', 'stay']):
+        intent_hint = 'housing'
+    elif any(token in query_lc for token in ['school', 'child', 'children', 'daycare']):
+        intent_hint = 'family_and_school'
+    else:
+        intent_hint = 'general_recovery'
+
+    if any(token in query_lc for token in ['timeline', 'when', 'how long', 'return time', 'return timeline']):
+        section_heading = 'Return Timeline'
+    elif any(token in query_lc for token in ['insurance', 'claim', 'adjuster', 'deductible', 'policy']):
+        section_heading = 'Insurance Recommendations'
+    elif any(token in query_lc for token in ['work', 'job', 'commute', 'employment']):
+        section_heading = 'Job Recommendations'
+    elif any(token in query_lc for token in ['housing', 'shelter', 'rent', 'apartment', 'school', 'children', 'child', 'daycare']):
+        section_heading = 'Move Decision'
+    elif any(token in query_lc for token in ['immediate', 'first', 'this week', 'next step', 'what should i do']):
+        section_heading = 'Immediate Actions'
+    else:
+        section_heading = 'Immediate Actions'
+
+    resources_for_prompt = []
+    for r in resources[:2]:
+        summary = str(r.get('summary') or '').strip()
+        resources_for_prompt.append(
+            {
+                'id': r.get('id'),
+                'title': r.get('title'),
+                'category': r.get('category'),
+                'county': r.get('county'),
+                'state': r.get('state'),
+                'risk_category': r.get('risk_category'),
+                'avg_recurrence_years': r.get('avg_recurrence_years'),
+                'return_timeline_months': r.get('return_timeline_months'),
+                'summary': summary[:320],
+            }
+        )
+
     prompt = (
         'You are a wildfire recovery assistant. Answer the user using only the retrieved resources and intake summary. '
-        'Prioritize housing guidance first when the user asks about housing. '
+        'Use a section style that matches the user question type. '
         'Use a balanced tone: recommend one best next action and include alternatives. Mention uncertainty if context is weak.\n\n'
-        'Format your response with exactly these four headings:\n'
-        '1) Immediate Actions\n'
-        '2) Move Decision\n'
-        '3) Return Timeline\n'
-        '4) Why This Recommendation\n\n'
-        'For Move Decision, include an estimated move distance range (for example: 10-25 miles, 30-60 miles) when risk is elevated. '
-        'For Return Timeline, include a months estimate based on retrieved context. '
-        'When recurrence risk is high or recurrence years < 3, explicitly mention risk of re-fire.\n\n'
+        'Write concise, scannable sections. Avoid repeating the heading text in the paragraph body. '
+        'Each section should be materially different and should not reuse the same sentence patterns. '
+        'Do not repeat the same opening sentence used in prior turns.\n\n'
+        'Keep the full answer under 120 words. '
+        'Use no more than 3 short bullets OR 3 short sentences total. '
+        'Do not include generic filler or repeated caveats.\n\n'
+        'Format your response with exactly one heading only, using this exact heading text:\n'
+        f'1) {section_heading}\n\n'
+        'Do not include any other section headings. '
+        'If heading is Move Decision, include an estimated move distance range. '
+        'If heading is Return Timeline, include a months estimate from retrieved context. '
+        'If heading is Job Recommendations, include concrete work/commute actions. '
+        'If heading is Insurance Recommendations, include concrete claim actions for this week.\n\n'
+        f'Recent user queries: {json.dumps(recent_user_queries or [], ensure_ascii=True)}\n\n'
+        f'Selected response heading: {section_heading}\n\n'
+        f'Intent hint: {intent_hint}\n\n'
         f'User query: {user_query}\n\n'
         f'Intake summary: {json.dumps(intake_summary, ensure_ascii=True)}\n\n'
         f'Retrieval mode: {ranking.get("retrieval_mode", "unknown")}\n\n'
-        f'Retrieved resources: {json.dumps(resources, ensure_ascii=True)}'
+        f'Retrieved resources: {json.dumps(resources_for_prompt, ensure_ascii=True)}'
     )
 
     try:
@@ -325,9 +375,42 @@ def generate_fire_response(user_query, ranking, intake_summary):
             model=GROQ_MODEL,
             messages=[{'role': 'user', 'content': prompt}],
             temperature=0.2,
+            max_tokens=320,
         )
         content = (completion.choices[0].message.content or '').strip()
         if content:
+            heading_rewrites = [
+                ('1) Immediate Actions', 'Immediate Actions'),
+                ('2) Move Decision', 'Move Decision'),
+                ('3) Return Timeline', 'Return Timeline'),
+                ('4) Why This Recommendation', 'Why This Recommendation'),
+                ('1) Job Recommendations', 'Job Recommendations'),
+                ('1) Insurance Recommendations', 'Insurance Recommendations'),
+            ]
+            for numbered_heading, plain_heading in heading_rewrites:
+                pattern = rf'(?im)^\s*(?:#+\s*)?{re.escape(numbered_heading)}\s+{re.escape(plain_heading)}\s*$'
+                content = re.sub(pattern, numbered_heading, content)
+
+            known_headings = [
+                'Immediate Actions',
+                'Move Decision',
+                'Return Timeline',
+                'Why This Recommendation',
+                'Job Recommendations',
+                'Insurance Recommendations',
+            ]
+            heading_union = '|'.join(re.escape(h) for h in known_headings)
+            expected_pattern = re.compile(
+                rf'(?is)(?:^|\n)\s*(?:#+\s*)?(?:\d+\)\s*)?{re.escape(section_heading)}\s*\n?(.*?)(?=\n\s*(?:#+\s*)?(?:\d+\)\s*)?(?:{heading_union})\s*(?:\n|$)|\Z)'
+            )
+            expected_match = expected_pattern.search(content)
+            if expected_match:
+                body = expected_match.group(1).strip()
+                content = f'1) {section_heading}\n{body}' if body else f'1) {section_heading}'
+            elif not re.search(rf'(?im)^\s*(?:#+\s*)?(?:\d+\)\s*)?{re.escape(section_heading)}\s*$', content):
+                content = f'1) {section_heading}\n{content.strip()}'
+
+            content = re.sub(r'\n{3,}', '\n\n', content).strip()
             return content
     except Exception as e:
         print(f'Error generating Groq response: {e}')
@@ -702,10 +785,15 @@ def send_chat_message():
             'county': county or intake_summary.get('county', ''),
             'zip_code': zip_code or intake_summary.get('zip_code', ''),
         })
-        assistant_text = generate_fire_response(message, ranking, intake_summary)
-
         key = f'{user_id}:{conversation_id}'
         conversation = _conversation_store.get(key, [])
+        recent_user_queries = [
+            m.get('content', '')
+            for m in conversation
+            if m.get('role') == 'user' and isinstance(m.get('content'), str)
+        ][-3:]
+
+        assistant_text = generate_fire_response(message, ranking, intake_summary, recent_user_queries=recent_user_queries)
 
         user_message = {
             'id': f'user-{uuid4()}',
