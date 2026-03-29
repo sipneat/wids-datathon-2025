@@ -130,3 +130,66 @@ def create_reply(post_id):
     except Exception as e:
         print(f"Error in create_reply: {e}")
         return jsonify({'error': str(e)}), 500
+
+
+@community_bp.route('/community/posts/<post_id>', methods=['DELETE', 'OPTIONS'])
+def delete_post(post_id):
+    if request.method == 'OPTIONS':
+        return '', 204
+
+    try:
+        user_id, auth_error = get_user_id()
+        if auth_error:
+            return auth_error
+
+        post_ref = db.collection('communityPosts').document(post_id)
+        post_doc = post_ref.get()
+        if not post_doc.exists:
+            return jsonify({'error': 'Post not found'}), 404
+
+        post_data = post_doc.to_dict() or {}
+        if post_data.get('userId') != user_id:
+            return jsonify({'error': 'Unauthorized access'}), 403
+
+        replies_ref = post_ref.collection('replies')
+        replies = list(replies_ref.stream())
+        batch = db.batch()
+        for reply_doc in replies:
+            batch.delete(reply_doc.reference)
+        batch.delete(post_ref)
+        batch.commit()
+
+        return jsonify({'success': True}), 200
+    except Exception as e:
+        print(f"Error in delete_post: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@community_bp.route('/community/posts/<post_id>/replies/<reply_id>', methods=['DELETE', 'OPTIONS'])
+def delete_reply(post_id, reply_id):
+    if request.method == 'OPTIONS':
+        return '', 204
+
+    try:
+        user_id, auth_error = get_user_id()
+        if auth_error:
+            return auth_error
+
+        post_ref = db.collection('communityPosts').document(post_id)
+        if not post_ref.get().exists:
+            return jsonify({'error': 'Post not found'}), 404
+
+        reply_ref = post_ref.collection('replies').document(reply_id)
+        reply_doc = reply_ref.get()
+        if not reply_doc.exists:
+            return jsonify({'error': 'Reply not found'}), 404
+
+        reply_data = reply_doc.to_dict() or {}
+        if reply_data.get('userId') != user_id:
+            return jsonify({'error': 'Unauthorized access'}), 403
+
+        reply_ref.delete()
+        return jsonify({'success': True}), 200
+    except Exception as e:
+        print(f"Error in delete_reply: {e}")
+        return jsonify({'error': str(e)}), 500

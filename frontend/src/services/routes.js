@@ -161,3 +161,17 @@ export async function createCommunityReply({ userId, postId, payload }) {
     body: payload
   });
 }
+
+export async function deleteCommunityPost({ userId, postId }) {
+  return requestJson(`/community/posts/${postId}`, {
+    method: 'DELETE',
+    userId
+  });
+}
+
+export async function deleteCommunityReply({ userId, postId, replyId }) {
+  return requestJson(`/community/posts/${postId}/replies/${replyId}`, {
+    method: 'DELETE',
+    userId
+  });
+}
