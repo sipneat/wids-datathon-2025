@@ -3,8 +3,9 @@ const API_PREFIX = `${API_BASE_URL}/api`;
 const USER_ID_HEADER = 'X-User-Id';
 
 async function requestJson(path, { method = 'GET', userId, headers = {}, body } = {}) {
+  const isFormData = typeof FormData !== 'undefined' && body instanceof FormData;
   const mergedHeaders = {
-    'Content-Type': 'application/json',
+    ...(isFormData ? {} : { 'Content-Type': 'application/json' }),
     ...headers
   };
 
@@ -16,7 +17,7 @@ async function requestJson(path, { method = 'GET', userId, headers = {}, body } 
     method,
     credentials: 'include',
     headers: mergedHeaders,
-    body: body ? JSON.stringify(body) : undefined
+    body: body ? (isFormData ? body : JSON.stringify(body)) : undefined
   });
 
   let data = null;
@@ -105,4 +106,33 @@ export async function getChatHistory({ userId, conversationId }) {
 
 export async function getLatestChat({ userId }) {
   return requestJson('/chat/latest', { userId });
+}
+
+export async function uploadInsuranceDocument({ userId, file }) {
+  const formData = new FormData();
+  formData.append('file', file);
+  return requestJson('/insurance/documents', {
+    method: 'POST',
+    userId,
+    body: formData
+  });
+}
+
+export async function getInsuranceDocuments({ userId }) {
+  return requestJson('/insurance/documents', { userId });
+}
+
+export async function updateInsuranceDocument({ userId, documentId, editedText }) {
+  return requestJson(`/insurance/documents/${documentId}`, {
+    method: 'PATCH',
+    userId,
+    body: { editedText }
+  });
+}
+
+export async function deleteInsuranceDocument({ userId, documentId }) {
+  return requestJson(`/insurance/documents/${documentId}`, {
+    method: 'DELETE',
+    userId
+  });
 }
