@@ -20,6 +20,84 @@ const initialMessages = [
   }
 ];
 
+const SECTION_TITLES = [
+  'Immediate Actions',
+  'Move Decision',
+  'Return Timeline',
+  'Why This Recommendation',
+  'Job Recommendations',
+  'Insurance Recommendations'
+];
+
+const SECTION_HEADING_MATCHERS = SECTION_TITLES.map((title) => {
+  const escaped = title.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return {
+    title,
+    regex: new RegExp(
+      `^(?:#{1,6}\\s*)?(?:\\d+\\)\\s*)?${escaped}(?:\\s+${escaped})?(?:\\s*[:\\-])?\\s*$`,
+      'i'
+    )
+  };
+});
+
+function parseStructuredSections(content) {
+  if (typeof content !== 'string') return null;
+
+  const lines = content.replace(/\r\n/g, '\n').split('\n');
+  const headingRows = [];
+
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i].trim();
+    if (!line || /^your profile$/i.test(line)) continue;
+    const matched = SECTION_HEADING_MATCHERS.find((matcher) => matcher.regex.test(line));
+    if (matched) headingRows.push({ row: i, title: matched.title });
+  }
+
+  if (!headingRows.length) return null;
+
+  const sections = headingRows
+    .map((entry, index) => {
+      const start = entry.row + 1;
+      const end = index < headingRows.length - 1 ? headingRows[index + 1].row : lines.length;
+      const body = lines
+        .slice(start, end)
+        .join('\n')
+        .replace(/^[:\-\s]+/, '')
+        .replace(/\n{3,}/g, '\n\n')
+        .trim();
+
+      return {
+        key: `${entry.title}-${index}`,
+        heading: entry.title,
+        body,
+      };
+    })
+    .filter((section) => section.body.length > 0);
+
+  return sections.length ? sections : null;
+}
+
+function AssistantMessageContent({ content }) {
+  const structuredSections = parseStructuredSections(content);
+
+  if (!structuredSections) {
+    return <p className="whitespace-pre-wrap">{content}</p>;
+  }
+
+  return (
+    <div className="space-y-3">
+      {structuredSections.map((section) => (
+        <article key={section.key} className="rounded-xl border border-emerald-200/70 bg-emerald-50/60 px-4 py-3">
+          <h3 className="text-sm font-bold tracking-wide text-emerald-900 uppercase">
+            {section.heading}
+          </h3>
+          <p className="mt-1 whitespace-pre-wrap text-gray-800">{section.body}</p>
+        </article>
+      ))}
+    </div>
+  );
+}
+
 export default function Chatbot({ userProfile }) {
   const [messages, setMessages] = useState(initialMessages);
   const [input, setInput] = useState('');
@@ -196,7 +274,7 @@ export default function Chatbot({ userProfile }) {
                             : 'bg-emerald-600 text-white'
                         }`}
                       >
-                        {message.content}
+                        {isAssistant ? <AssistantMessageContent content={message.content} /> : message.content}
                       </div>
                       {!isAssistant && (
                         <div className="w-8 h-8 rounded-full bg-gray-700 text-white flex items-center justify-center shrink-0 overflow-hidden">
