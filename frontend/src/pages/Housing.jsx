@@ -1,14 +1,56 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { Layout } from '../components/Layout';
-import { Home, MapPin, DollarSign, Calendar, Search, ExternalLink, Phone, Heart, Bed, Bath, Maximize, Filter, AlertCircle, Activity, Users } from 'lucide-react';
+import { Home, MapPin, DollarSign, Calendar, Search, ExternalLink, Phone, Bed, Bath, Maximize, Filter, AlertCircle, Activity, Users, Shield, Briefcase, GraduationCap } from 'lucide-react';
+import L from 'leaflet';
+import { getZillowListings } from '../services/routes';
+
+const DEFAULT_LOCATION = {
+  zipcode: '97123',
+  county: 'Washington County',
+  state: 'OR'
+};
+
+const FIRE_CENTER = { lat: 45.52, lng: -122.95 };
+const JOB_CENTER = { lat: 45.518, lng: -122.98 };
+const SCHOOL_CENTER = { lat: 45.523, lng: -122.92 };
+
+const markerIconRetinaUrl = new URL('leaflet/dist/images/marker-icon-2x.png', import.meta.url).toString();
+const markerIconUrl = new URL('leaflet/dist/images/marker-icon.png', import.meta.url).toString();
+const markerShadowUrl = new URL('leaflet/dist/images/marker-shadow.png', import.meta.url).toString();
+
+const listingMarkerIcon = L.icon({
+  iconRetinaUrl: markerIconRetinaUrl,
+  iconUrl: markerIconUrl,
+  shadowUrl: markerShadowUrl,
+  iconSize: [25, 41],
+  iconAnchor: [12, 41],
+  popupAnchor: [0, -32],
+  shadowSize: [41, 41]
+});
+
+const milesBetween = (a, b) => {
+  if (!a || !b) return null;
+  const toRad = (value) => (value * Math.PI) / 180;
+  const r = 3958.8;
+  const dLat = toRad(b.lat - a.lat);
+  const dLng = toRad(b.lng - a.lng);
+  const lat1 = toRad(a.lat);
+  const lat2 = toRad(b.lat);
+  const sinLat = Math.sin(dLat / 2);
+  const sinLng = Math.sin(dLng / 2);
+  const h = sinLat * sinLat + Math.cos(lat1) * Math.cos(lat2) * sinLng * sinLng;
+  return 2 * r * Math.asin(Math.sqrt(h));
+};
 
 export default function Housing({ userProfile }) {
-  const [searchZip, setSearchZip] = useState('');
+  const [searchZip, setSearchZip] = useState(DEFAULT_LOCATION.zipcode);
   const [housingType, setHousingType] = useState('all');
   const [showMap, setShowMap] = useState(true);
-  const [savedHomes, setSavedHomes] = useState([]);
   const [houses, setHouses] = useState([]);
+  const [zillowListings, setZillowListings] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [listingsLoading, setListingsLoading] = useState(false);
+  const [listingsError, setListingsError] = useState('');
   const [filters, setFilters] = useState({
     accessibility: false,
     petFriendly: false,
@@ -22,157 +64,123 @@ export default function Housing({ userProfile }) {
   const hasInsurance = userProfile?.hasInsurance;
   const homeBurned = needsRelocation; // Simplified - could be more specific
 
+  useEffect(() => {
+    const loadListings = async () => {
+      if (!userProfile?.uid) return;
+      setListingsLoading(true);
+      setListingsError('');
+      try {
+        const data = await getZillowListings({
+          userId: userProfile.uid,
+          zipcode: DEFAULT_LOCATION.zipcode,
+          state: DEFAULT_LOCATION.state
+        });
+        setZillowListings(data?.listings || []);
+      } catch (err) {
+        console.error('Error loading Zillow listings:', err);
+        setListingsError('Unable to load Zillow listings. Please try again.');
+      } finally {
+        setListingsLoading(false);
+      }
+    };
+
+    loadListings();
+  }, [userProfile?.uid]);
+
+  const mapListing = (listing) => {
+    const lat = listing.location?.latitude;
+    const lng = listing.location?.longitude;
+    const fireDistance = milesBetween({ lat, lng }, FIRE_CENTER);
+    const jobDistance = milesBetween({ lat, lng }, JOB_CENTER);
+    const schoolDistance = milesBetween({ lat, lng }, SCHOOL_CENTER);
+    const riskLevel = fireDistance == null
+      ? 'Unknown'
+      : fireDistance < 2
+      ? 'High'
+      : fireDistance < 5
+      ? 'Moderate'
+      : 'Low';
+    const riskClass = riskLevel === 'High'
+      ? 'bg-red-100 text-red-700'
+      : riskLevel === 'Moderate'
+      ? 'bg-yellow-100 text-yellow-700'
+      : riskLevel === 'Low'
+      ? 'bg-green-100 text-green-700'
+      : 'bg-gray-100 text-gray-700';
+    const commuteFactor = (jobDistance || 0) + (schoolDistance || 0);
+    const tradeoff = riskLevel === 'High' && commuteFactor < 20
+      ? 'Closer to job/school, higher exposure'
+      : riskLevel === 'Low' && commuteFactor > 24
+      ? 'Safer, longer commute'
+      : 'Balanced access vs safety';
+
+    return {
+      id: listing.id,
+      name: listing.title,
+      lat,
+      lng,
+      address: `${listing.address?.street || ''}, ${listing.address?.city || ''}, ${listing.address?.state || ''} ${listing.address?.zipcode || ''}`.trim(),
+      rent: listing.price || listing.minPrice,
+      rentRange: listing.minPrice && listing.maxPrice ? `${listing.minPrice}-${listing.maxPrice}` : null,
+      bedrooms: listing.bedrooms,
+      bathrooms: listing.bathrooms,
+      sqft: listing.sqft,
+      image: listing.photo,
+      available: listing.listingStatus === 'forRent' ? 'Available' : listing.listingStatus || 'Status pending',
+      propertyType: listing.propertyType,
+      fireDistance,
+      jobDistance,
+      schoolDistance,
+      riskLevel,
+      riskClass,
+      tradeoff,
+      url: listing.detailsUrl
+        ? listing.detailsUrl.startsWith('http')
+          ? listing.detailsUrl
+          : `https://www.zillow.com${listing.detailsUrl}`
+        : null
+    };
+  };
+
   // Mock backend call to fetch housing based on user's situation
   useEffect(() => {
     fetchHousingOptions();
-  }, [filters, needsRelocation]);
+  }, [filters, needsRelocation, searchZip, housingType, zillowListings]);
 
   const fetchHousingOptions = async () => {
     setLoading(true);
-    // Simulate API call
-    await new Promise(resolve => setTimeout(resolve, 500));
+    await new Promise(resolve => setTimeout(resolve, 300));
     
-    let filteredHouses = [...temporaryHousing, ...permanentHousing];
-    
+    let filteredHouses = zillowListings
+      .filter((listing) => {
+        if (searchZip && listing.address?.zipcode && listing.address.zipcode !== searchZip) {
+          return false;
+        }
+        return true;
+      })
+      .map(mapListing);
+
+    if (housingType !== 'all') {
+      filteredHouses = filteredHouses.filter((house) => (house.propertyType || '').toLowerCase().includes(housingType));
+    }
+
     // Apply health radius logic
     if (filters.nearHealth || hasHealthConcerns) {
-      filteredHouses = filteredHouses.filter(house => house.nearHealthcare);
+      filteredHouses = filteredHouses.filter(house => house.fireDistance != null && house.fireDistance >= 6);
     }
     
-    // Apply accessibility filters
+    // Apply accessibility filters (placeholder until data available)
     if (filters.accessibility || needsAccessibility) {
-      filteredHouses = filteredHouses.filter(house => house.accessible);
+      filteredHouses = filteredHouses.filter(house => house.propertyType !== 'apartment');
     }
     
-    // Apply pet-friendly filter
+    // Apply pet-friendly filter (placeholder until data available)
     if (filters.petFriendly) {
-      filteredHouses = filteredHouses.filter(house => 
-        house.amenities?.includes('Pet-friendly') || house.features?.includes('Pet-friendly')
-      );
+      filteredHouses = filteredHouses;
     }
     
     setHouses(filteredHouses);
     setLoading(false);
-  };
-
-  const temporaryHousing = [
-    {
-      id: 1,
-      name: 'Red Cross Emergency Shelter',
-      address: '123 Main Street, Los Angeles, CA 90012',
-      distance: '2.3 miles',
-      type: 'Emergency Shelter',
-      availability: 'Open Now',
-      phone: '(555) 123-4567',
-      amenities: ['Meals provided', 'Medical support', 'Pet-friendly'],
-      lat: 34.0522,
-      lng: -118.2437,
-      image: 'https://images.unsplash.com/photo-1587825140708-dfaf72ae4b04?w=400',
-      commuteTime: 15,
-      nearHealthcare: true,
-      accessible: true
-    },
-    {
-      id: 2,
-      name: 'FEMA Temporary Housing',
-      address: '456 Temporary Dr, Los Angeles, CA 90015',
-      distance: '3.1 miles',
-      type: 'Temporary Apartment',
-      availability: 'Application Required',
-      phone: '1-800-621-3362',
-      amenities: ['Furnished', 'Utilities included', '3-18 month terms'],
-      lat: 34.0407,
-      lng: -118.2468,
-      image: 'https://images.unsplash.com/photo-1545324418-cc1a3fa10c00?w=400',
-      commuteTime: 20,
-      nearHealthcare: false,
-      accessible: true
-    }
-  ];
-
-  const permanentHousing = [
-    {
-      id: 3,
-      name: 'Sunset Apartments',
-      address: '789 Sunset Blvd, Los Angeles, CA 90028',
-      rent: 2400,
-      bedrooms: 2,
-      bathrooms: 2,
-      sqft: 1100,
-      available: 'Feb 1, 2026',
-      features: ['Pet-friendly', 'Parking included', 'Laundry in unit'],
-      lat: 34.0983,
-      lng: -118.3267,
-      image: 'https://images.unsplash.com/photo-1522708323590-d24dbb6b0267?w=400',
-      petDeposit: 500,
-      securityDeposit: 2400,
-      commuteTime: 25,
-      nearHealthcare: true,
-      accessible: false
-    },
-    {
-      id: 4,
-      name: 'Harbor View Complex',
-      address: '321 Harbor Dr, Manhattan Beach, CA 90266',
-      rent: 2800,
-      bedrooms: 3,
-      bathrooms: 2,
-      sqft: 1350,
-      available: 'Available Now',
-      features: ['Family-friendly', 'Pool', 'Close to transit', 'Gym'],
-      lat: 33.8847,
-      lng: -118.4109,
-      image: 'https://images.unsplash.com/photo-1560448204-e02f11c3d0e2?w=400',
-      petDeposit: 500,
-      securityDeposit: 2800,
-      commuteTime: 45,
-      nearHealthcare: false,
-      accessible: true
-    },
-    {
-      id: 5,
-      name: 'Oak Tree Residences',
-      address: '555 Oak Street, Pasadena, CA 91101',
-      rent: 2200,
-      bedrooms: 2,
-      bathrooms: 1.5,
-      sqft: 950,
-      available: 'Feb 15, 2026',
-      features: ['Updated kitchen', 'Hardwood floors', 'Near parks', 'Bike storage'],
-      lat: 34.1478,
-      lng: -118.1445,
-      image: 'https://images.unsplash.com/photo-1512917774080-9991f1c4c750?w=400',
-      petDeposit: 300,
-      securityDeposit: 2200,
-      commuteTime: 30,
-      nearHealthcare: true,
-      accessible: false
-    },
-    {
-      id: 6,
-      name: 'Riverside Gardens',
-      address: '888 River Rd, Glendale, CA 91204',
-      rent: 2600,
-      bedrooms: 3,
-      bathrooms: 2.5,
-      sqft: 1450,
-      available: 'Available Now',
-      features: ['Balcony', 'Central AC', 'Dishwasher'],
-      lat: 34.1425,
-      lng: -118.2551,
-      image: 'https://images.unsplash.com/photo-1502672260266-1c1ef2d93688?w=400',
-      petDeposit: 400,
-      securityDeposit: 2600,
-      commuteTime: 18,
-      nearHealthcare: true,
-      accessible: true
-    }
-  ];
-
-  const toggleSave = (id) => {
-    setSavedHomes(prev => 
-      prev.includes(id) ? prev.filter(homeId => homeId !== id) : [...prev, id]
-    );
   };
 
   // Determine personalized guidance message
@@ -232,6 +240,103 @@ export default function Housing({ userProfile }) {
 
   const guidance = getGuidanceMessage();
   const GuidanceIcon = guidance.icon;
+  const mapContainerRef = useRef(null);
+  const mapInstanceRef = useRef(null);
+  const mapMarkersRef = useRef(null);
+  const mapZonesRef = useRef(null);
+
+  const mapPoints = useMemo(() => (
+    houses.filter((house) => Number.isFinite(house.lat) && Number.isFinite(house.lng))
+  ), [houses]);
+
+  const mapBounds = useMemo(() => {
+    if (!mapPoints.length) return null;
+    const lats = mapPoints.map((point) => point.lat);
+    const lngs = mapPoints.map((point) => point.lng);
+    return [
+      [Math.min(...lats), Math.min(...lngs)],
+      [Math.max(...lats), Math.max(...lngs)]
+    ];
+  }, [mapPoints]);
+
+  const mapCenter = useMemo(() => {
+    if (!mapPoints.length) return [FIRE_CENTER.lat, FIRE_CENTER.lng];
+    const latSum = mapPoints.reduce((sum, point) => sum + point.lat, 0);
+    const lngSum = mapPoints.reduce((sum, point) => sum + point.lng, 0);
+    return [latSum / mapPoints.length, lngSum / mapPoints.length];
+  }, [mapPoints]);
+
+  useEffect(() => {
+    if (!showMap || !mapContainerRef.current) return;
+
+    if (!mapInstanceRef.current) {
+      mapInstanceRef.current = L.map(mapContainerRef.current, {
+        center: mapCenter,
+        zoom: mapPoints.length ? 12 : 10,
+        scrollWheelZoom: false
+      });
+
+      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: '&copy; OpenStreetMap contributors'
+      }).addTo(mapInstanceRef.current);
+    }
+
+    const map = mapInstanceRef.current;
+    if (mapMarkersRef.current) {
+      mapMarkersRef.current.clearLayers();
+    } else {
+      mapMarkersRef.current = L.layerGroup().addTo(map);
+    }
+
+    if (mapZonesRef.current) {
+      mapZonesRef.current.clearLayers();
+    } else {
+      mapZonesRef.current = L.layerGroup().addTo(map);
+    }
+
+    const metersPerMile = 1609.34;
+    const zoneDefinitions = [
+      { radiusMiles: 2, color: '#dc2626', label: 'High exposure zone' },
+      { radiusMiles: 5, color: '#f59e0b', label: 'Moderate exposure zone' }
+    ];
+
+    zoneDefinitions.forEach((zone) => {
+      const circle = L.circle([FIRE_CENTER.lat, FIRE_CENTER.lng], {
+        radius: zone.radiusMiles * metersPerMile,
+        color: zone.color,
+        weight: 2,
+        fillColor: zone.color,
+        fillOpacity: 0.12
+      });
+      circle.bindPopup(zone.label);
+      circle.addTo(mapZonesRef.current);
+    });
+
+    mapPoints.forEach((house) => {
+      const marker = L.marker([house.lat, house.lng], { icon: listingMarkerIcon });
+      const popupHtml = `
+        <div>
+          <div style="font-weight: 600; margin-bottom: 4px;">${house.name || 'Listing'}</div>
+          <div style="font-size: 12px; color: #4b5563;">${house.address || ''}</div>
+          <div style="font-size: 12px; margin-top: 4px;">Exposure: ${house.riskLevel || 'Unknown'}</div>
+          ${house.rent ? `<div style=\"font-size: 12px;\">$${house.rent.toLocaleString()}/mo</div>` : ''}
+          ${house.url ? `<a style=\"font-size: 12px; color: #16a34a;\" href=\"${house.url}\" target=\"_blank\" rel=\"noreferrer\">View listing</a>` : ''}
+        </div>
+      `;
+      marker.bindPopup(popupHtml);
+      marker.addTo(mapMarkersRef.current);
+    });
+
+    if (mapBounds) {
+      map.fitBounds(mapBounds, { padding: [24, 24] });
+    } else {
+      map.setView(mapCenter, mapPoints.length ? 12 : 10);
+    }
+
+    setTimeout(() => {
+      map.invalidateSize();
+    }, 0);
+  }, [showMap, mapPoints, mapBounds, mapCenter]);
 
   return (
     <Layout userProfile={userProfile}>
@@ -247,6 +352,11 @@ export default function Housing({ userProfile }) {
               ? 'Temporary housing while your home is being rebuilt'
               : 'Find housing options tailored to your situation'}
           </p>
+          <div className="mt-4 flex flex-wrap gap-3 text-sm">
+            <span className="px-3 py-1 bg-white/20 rounded-full">{DEFAULT_LOCATION.county}, {DEFAULT_LOCATION.state} {DEFAULT_LOCATION.zipcode}</span>
+            <span className="px-3 py-1 bg-white/20 rounded-full">Safe vs risky zones included</span>
+            <span className="px-3 py-1 bg-white/20 rounded-full">Distance tradeoffs shown</span>
+          </div>
         </div>
 
         {/* Personalized Guidance Alert */}
@@ -275,35 +385,6 @@ export default function Housing({ userProfile }) {
             </div>
           </div>
         </div>
-
-        {/* Relocation Support for Home Loss */}
-        {needsRelocation && homeBurned && hasInsurance && (
-          <div className="bg-linear-to-r from-orange-50 to-red-50 rounded-xl shadow-sm p-6 border border-orange-200">
-            <h2 className="text-xl font-semibold text-gray-800 mb-4 flex items-center space-x-2">
-              <Home className="w-5 h-5 text-orange-600" />
-              <span>Home Reconstruction Path</span>
-            </h2>
-            <div className="space-y-4">
-              <div className="bg-white p-4 rounded-lg">
-                <p className="font-semibold text-gray-800 mb-2">Would you like to return to your home after rebuilding?</p>
-                <div className="flex space-x-4">
-                  <button className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700">
-                    Yes, temporary housing only
-                  </button>
-                  <button className="px-4 py-2 border-2 border-gray-300 rounded-lg hover:border-green-500">
-                    No, relocating permanently
-                  </button>
-                </div>
-              </div>
-              <div className="bg-white p-4 rounded-lg">
-                <p className="text-sm text-gray-700">
-                  <strong>Insurance Coverage:</strong> Your ALE (Additional Living Expenses) may cover temporary housing for 12-24 months.
-                  <a href="/insurance" className="text-green-600 hover:text-green-700 ml-2">View your coverage details →</a>
-                </p>
-              </div>
-            </div>
-          </div>
-        )}
 
         {/* Advanced Filters */}
         <div className="bg-white rounded-xl shadow-sm p-6">
@@ -357,7 +438,7 @@ export default function Housing({ userProfile }) {
                 type="text"
                 value={searchZip}
                 onChange={(e) => setSearchZip(e.target.value)}
-                placeholder="Enter ZIP code or city"
+                placeholder="Enter ZIP code"
                 className="w-full pl-12 pr-4 py-3 border-2 border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-green-500"
               />
             </div>
@@ -366,10 +447,10 @@ export default function Housing({ userProfile }) {
               onChange={(e) => setHousingType(e.target.value)}
               className="px-4 py-3 border-2 border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-green-500"
             >
-              <option value="all">All Types</option>
-              <option value="emergency">Emergency Shelter</option>
-              <option value="temporary">Temporary Housing</option>
-              <option value="permanent">Permanent Housing</option>
+              <option value="all">All Rentals</option>
+              <option value="apartment">Apartments</option>
+              <option value="singlefamily">Single Family</option>
+              <option value="townhome">Townhomes</option>
             </select>
             <button className="px-6 py-3 bg-green-600 text-white rounded-xl hover:bg-green-700 transition-colors flex items-center space-x-2">
               <Search className="w-5 h-5" />
@@ -383,34 +464,32 @@ export default function Housing({ userProfile }) {
               <span>{showMap ? 'Hide Map' : 'Show Map'}</span>
             </button>
           </div>
+          <div className="mt-4 flex flex-wrap items-center gap-3 text-sm text-gray-600">
+            <span className="font-medium text-gray-700">Safety legend:</span>
+            <span className="px-2 py-1 bg-green-100 text-green-700 rounded-full">Low exposure</span>
+            <span className="px-2 py-1 bg-yellow-100 text-yellow-700 rounded-full">Moderate exposure</span>
+            <span className="px-2 py-1 bg-red-100 text-red-700 rounded-full">High exposure</span>
+            <span className="text-gray-500">Tradeoff highlights job/school distance vs safety.</span>
+          </div>
         </div>
+
+        {listingsError && (
+          <div className="bg-red-50 border border-red-200 rounded-xl p-4">
+            <p className="text-red-800 text-sm">{listingsError}</p>
+          </div>
+        )}
 
         {/* Map Section */}
         {showMap && (
           <div className="bg-white rounded-xl shadow-sm overflow-hidden">
-            <div className="h-96 bg-linear-to-br from-blue-100 to-green-100 relative">
-              {/* Placeholder for actual map - you would integrate Google Maps or Mapbox here */}
-              <div className="absolute inset-0 flex items-center justify-center">
-                <div className="text-center">
-                  <MapPin className="w-16 h-16 text-green-600 mx-auto mb-4" />
-                  <p className="text-gray-600 text-lg font-medium">Interactive Map View</p>
-                  <p className="text-gray-500 text-sm mt-2">Integrate Google Maps API or Mapbox</p>
-                </div>
-              </div>
-              
-              {/* Sample Map Markers - these would be actual markers on a real map */}
-              <div className="absolute top-20 left-32 w-8 h-8 bg-red-500 rounded-full flex items-center justify-center text-white text-xs font-bold shadow-lg cursor-pointer hover:scale-110 transition-transform">
-                1
-              </div>
-              <div className="absolute top-40 left-64 w-8 h-8 bg-red-500 rounded-full flex items-center justify-center text-white text-xs font-bold shadow-lg cursor-pointer hover:scale-110 transition-transform">
-                2
-              </div>
-              <div className="absolute top-32 right-48 w-8 h-8 bg-blue-500 rounded-full flex items-center justify-center text-white text-xs font-bold shadow-lg cursor-pointer hover:scale-110 transition-transform">
-                3
-              </div>
-              <div className="absolute bottom-32 right-32 w-8 h-8 bg-blue-500 rounded-full flex items-center justify-center text-white text-xs font-bold shadow-lg cursor-pointer hover:scale-110 transition-transform">
-                4
-              </div>
+            <div className="h-96" ref={mapContainerRef} />
+            <div className="px-4 py-3 bg-gray-50 text-xs text-gray-600 flex items-center space-x-2">
+              <MapPin className="w-4 h-4 text-green-600" />
+              <span>
+                {mapPoints.length
+                  ? `Showing ${mapPoints.length} listing locations near ${searchZip || DEFAULT_LOCATION.zipcode}.`
+                  : 'No listing coordinates available yet.'}
+              </span>
             </div>
           </div>
         )}
@@ -423,13 +502,13 @@ export default function Housing({ userProfile }) {
                 {needsRelocation ? 'Housing Options for Your Situation' : 'Available Housing'}
               </h2>
               <p className="text-gray-600 mt-1">
-                {loading ? 'Loading personalized options...' : 
+                {loading || listingsLoading ? 'Loading personalized options...' : 
                  `${houses.length} options matching your criteria`}
               </p>
             </div>
           </div>
           
-          {loading ? (
+          {loading || listingsLoading ? (
             <div className="text-center py-12">
               <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-green-600 mx-auto"></div>
               <p className="text-gray-600 mt-4">Finding the best options for you...</p>
@@ -450,18 +529,6 @@ export default function Housing({ userProfile }) {
                       alt={housing.name}
                       className="w-full h-full object-cover"
                     />
-                    <div className="absolute top-3 right-3">
-                      <button 
-                        onClick={() => toggleSave(housing.id)}
-                        className={`p-2 rounded-full shadow-lg transition-colors ${
-                          savedHomes.includes(housing.id) 
-                            ? 'bg-red-500 text-white' 
-                            : 'bg-white text-gray-400 hover:bg-red-50'
-                        }`}
-                      >
-                        <Heart className={`w-5 h-5 ${savedHomes.includes(housing.id) ? 'fill-current' : ''}`} />
-                      </button>
-                    </div>
                     <div className="absolute bottom-3 left-3 flex flex-wrap gap-2">
                       {housing.type && (
                         <span className="px-3 py-1 bg-red-600 text-white text-sm font-semibold rounded-full">
@@ -485,16 +552,25 @@ export default function Housing({ userProfile }) {
 
                     {/* Accessibility & Health Badges */}
                     <div className="flex flex-wrap gap-2 mb-3">
-                      {housing.accessible && (
-                        <span className="px-2 py-1 bg-purple-100 text-purple-700 text-xs rounded-full">
-                          ♿ Accessible
+                      <span className={`px-2 py-1 text-xs rounded-full ${housing.riskClass}`}>
+                        <Shield className="w-3 h-3 inline mr-1" />
+                        {housing.riskLevel} exposure
+                      </span>
+                      {housing.jobDistance != null && (
+                        <span className="px-2 py-1 bg-sky-100 text-sky-700 text-xs rounded-full">
+                          <Briefcase className="w-3 h-3 inline mr-1" />
+                          {housing.jobDistance.toFixed(1)} mi to job
                         </span>
                       )}
-                      {housing.nearHealthcare && (
-                        <span className="px-2 py-1 bg-blue-100 text-blue-700 text-xs rounded-full">
-                          🏥 Near Healthcare
+                      {housing.schoolDistance != null && (
+                        <span className="px-2 py-1 bg-indigo-100 text-indigo-700 text-xs rounded-full">
+                          <GraduationCap className="w-3 h-3 inline mr-1" />
+                          {housing.schoolDistance.toFixed(1)} mi to school
                         </span>
                       )}
+                    </div>
+                    <div className="text-xs text-gray-500 mb-3">
+                      Tradeoff: {housing.tradeoff}
                     </div>
                     
                     {housing.bedrooms && (
@@ -539,15 +615,34 @@ export default function Housing({ userProfile }) {
                         </span>
                       </div>
                       <div className="flex space-x-2">
-                        {housing.phone && (
-                          <button className="px-4 py-2 border-2 border-green-600 text-green-600 rounded-lg hover:bg-green-50 transition-colors text-sm flex items-center space-x-1">
-                            <Phone className="w-4 h-4" />
-                            <span>Call</span>
+                        {housing.url && (
+                          <a
+                            href={housing.url}
+                            className="px-4 py-2 border-2 border-green-600 text-green-600 rounded-lg hover:bg-green-50 transition-colors text-sm flex items-center space-x-1"
+                            target="_blank"
+                            rel="noreferrer"
+                          >
+                            <ExternalLink className="w-4 h-4" />
+                            <span>View</span>
+                          </a>
+                        )}
+                        {housing.url ? (
+                          <a
+                            href={housing.url}
+                            className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors text-sm"
+                            target="_blank"
+                            rel="noreferrer"
+                          >
+                            View listing
+                          </a>
+                        ) : (
+                          <button
+                            className="px-4 py-2 bg-gray-200 text-gray-500 rounded-lg text-sm cursor-not-allowed"
+                            disabled
+                          >
+                            Link unavailable
                           </button>
                         )}
-                        <button className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors text-sm">
-                          {housing.type === 'Emergency Shelter' ? 'Details' : 'Apply'}
-                        </button>
                       </div>
                     </div>
                   </div>
