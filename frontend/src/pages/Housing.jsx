@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo, useRef } from 'react';
 import { Layout } from '../components/Layout';
 import { Home, MapPin, DollarSign, Calendar, Search, ExternalLink, Phone, Bed, Bath, Maximize, Filter, AlertCircle, Activity, Users, Shield, Briefcase, GraduationCap } from 'lucide-react';
 import L from 'leaflet';
-import { getZillowListings } from '../services/routes';
+import { getZillowListings, saveHousingContext } from '../services/routes';
 
 const DEFAULT_LOCATION = {
   zipcode: '97123',
@@ -180,6 +180,36 @@ export default function Housing({ userProfile }) {
     }
     
     setHouses(filteredHouses);
+
+    if (userProfile?.uid) {
+      const contextListings = filteredHouses.slice(0, 15).map((house) => ({
+        id: house.id,
+        name: house.name,
+        address: house.address,
+        rent: house.rent,
+        bedrooms: house.bedrooms,
+        bathrooms: house.bathrooms,
+        riskLevel: house.riskLevel,
+        fireDistance: house.fireDistance,
+        jobDistance: house.jobDistance,
+        schoolDistance: house.schoolDistance,
+        tradeoff: house.tradeoff,
+        url: house.url,
+      }));
+
+      try {
+        await saveHousingContext({
+          userId: userProfile.uid,
+          searchZip,
+          housingType,
+          filters,
+          listings: contextListings,
+        });
+      } catch (err) {
+        console.error('Error saving housing context:', err);
+      }
+    }
+
     setLoading(false);
   };
 

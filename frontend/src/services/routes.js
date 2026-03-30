@@ -160,6 +160,23 @@ export async function getZillowListings({ userId, zipcode, state, city }) {
   return requestJson(path, { userId });
 }
 
+export async function saveHousingContext({ userId, searchZip, housingType, filters, listings }) {
+  return requestJson('/housing/context', {
+    method: 'POST',
+    userId,
+    body: {
+      searchZip,
+      housingType,
+      filters,
+      listings,
+    },
+  });
+}
+
+export async function getHousingContext({ userId }) {
+  return requestJson('/housing/context', { userId });
+}
+
 export async function createCommunityPost({ userId, payload }) {
   return requestJson('/community/posts', {
     method: 'POST',

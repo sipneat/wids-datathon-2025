@@ -380,6 +380,44 @@ def _load_latest_insurance_context(user_id, max_chars=1200):
         return None
 
 
+def _load_latest_housing_context(user_id, max_listings=8):
+    try:
+        doc = db.collection('housingContexts').document(user_id).get()
+        if not doc.exists:
+            return None
+
+        payload = doc.to_dict() or {}
+        listings = payload.get('listings') if isinstance(payload.get('listings'), list) else []
+        compact = []
+        for item in listings[:max_listings]:
+            if not isinstance(item, dict):
+                continue
+            compact.append(
+                {
+                    'name': item.get('name'),
+                    'rent': item.get('rent'),
+                    'bedrooms': item.get('bedrooms'),
+                    'bathrooms': item.get('bathrooms'),
+                    'riskLevel': item.get('riskLevel'),
+                    'fireDistance': item.get('fireDistance'),
+                    'jobDistance': item.get('jobDistance'),
+                    'schoolDistance': item.get('schoolDistance'),
+                    'tradeoff': item.get('tradeoff'),
+                    'address': item.get('address'),
+                }
+            )
+
+        return {
+            'searchZip': payload.get('searchZip') or '',
+            'housingType': payload.get('housingType') or 'all',
+            'filters': payload.get('filters') or {},
+            'listings': compact,
+        }
+    except Exception as e:
+        print(f'Error loading housing context: {e}')
+        return None
+
+
 def _load_latest_conversation_id_for_user(user_id):
     try:
         docs = list(
@@ -638,6 +676,7 @@ def generate_fire_response(
     recent_user_queries=None,
     recent_chat_context=None,
     insurance_context=None,
+    housing_context=None,
 ):
     resources = ranking.get('top_resources', []) if isinstance(ranking, dict) else []
     if not resources:
@@ -710,12 +749,14 @@ def generate_fire_response(
         'If heading is Return Timeline, include a months estimate from retrieved context. '
         'If heading is Job Recommendations, include concrete work/commute actions. '
         'If heading is Insurance Recommendations, include concrete claim actions for this week. '
+        'For housing questions, prioritize Housing context and cite concrete listing details when available (rent, bedroom count, risk level, and commute/school distance). '
         'For insurance questions, prioritize Insurance document context and cite specific values (coverage limits, deductible, claim number, ALE, inspection date) when available. '
         'Do not output placeholders like "check your policy" when exact policy values are present in context. '
         'If insurance document context contains policy/claim/deductible/coverage/deadline details, use at least one concrete detail from it in the answer. '
         'Do not invent document values that are not present.\n\n'
         f'Recent user queries: {json.dumps(recent_user_queries or [], ensure_ascii=True)}\n\n'
         f'Recent conversation context (scoped): {json.dumps(recent_chat_context or [], ensure_ascii=True)}\n\n'
+        f'Housing context (scoped): {json.dumps(housing_context or {}, ensure_ascii=True)}\n\n'
         f'Insurance document context (scoped): {json.dumps(insurance_context or {}, ensure_ascii=True)}\n\n'
         f'Selected response heading: {section_heading}\n\n'
         f'Intent hint: {intent_hint}\n\n'
@@ -1151,6 +1192,7 @@ def send_chat_message():
             for m in conversation
             if m.get('role') == 'user' and isinstance(m.get('content'), str)
         ][-3:]
+        housing_context = _load_latest_housing_context(user_id)
         insurance_context = _load_latest_insurance_context(user_id)
 
         assistant_text = generate_fire_response(
@@ -1160,6 +1202,7 @@ def send_chat_message():
             recent_user_queries=recent_user_queries,
             recent_chat_context=recent_chat_context,
             insurance_context=insurance_context,
+            housing_context=housing_context,
         )
 
         user_message = {
@@ -1197,6 +1240,11 @@ def send_chat_message():
                 'history': {
                     'source': 'firestore',
                     'scoped_messages_used': len(recent_chat_context),
+                },
+                'housing_context': {
+                    'attached': bool(housing_context),
+                    'search_zip': (housing_context or {}).get('searchZip') if housing_context else None,
+                    'listings_count': len((housing_context or {}).get('listings') or []) if housing_context else 0,
                 },
                 'insurance_context': {
                     'attached': bool(insurance_context),
