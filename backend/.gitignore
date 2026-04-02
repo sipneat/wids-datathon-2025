@@ -1,6 +1,7 @@
 # Firebase credentials
 credentials.json
 serviceAccountKey.json
+.lambda-build
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

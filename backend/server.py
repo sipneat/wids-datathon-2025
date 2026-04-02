@@ -1,11 +1,13 @@
+import os
 from flask import Flask, jsonify
 from flask_cors import CORS
-from dotenv import load_dotenv
+
+from secrets import load_env
+load_env()
 
 from routes import blueprints
 
 app = Flask(__name__)
-load_dotenv()
 
 CORS(app, supports_credentials=True)
 
@@ -31,4 +33,6 @@ for bp in blueprints:
     app.register_blueprint(bp, url_prefix=f"/api{bp.url_prefix}")
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=3000, debug=True)
+    port = int(os.getenv('PORT', '3000'))
+    debug = os.getenv('FLASK_DEBUG', 'true')
+    app.run(host='0.0.0.0', port=port, debug=debug)
