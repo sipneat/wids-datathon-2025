@@ -284,11 +284,6 @@ export default function Chatbot({ userProfile }) {
                 </button>
               ))}
             </div>
-            <div className="mt-5 p-3 bg-amber-50 border border-amber-200 rounded-lg">
-              <p className="text-xs text-amber-800">
-                Current mode: live backend chat. If provider keys are missing, this panel will show the exact backend error.
-              </p>
-            </div>
           </section>
 
           <section className="lg:col-span-2 bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">

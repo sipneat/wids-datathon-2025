@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { BrowserRouter as Router, Routes, Route, Navigate } from "react-router-dom";
+import { BrowserRouter as Router, Routes, Route, Navigate, useLocation } from "react-router-dom";
 import Login from "./pages/Login";
 import Intake from "./pages/Intake";
 import Dashboard from "./pages/Dashboard";
@@ -11,6 +11,37 @@ import Chatbot from "./pages/Chatbot";
 import { auth } from "./services/firebase";
 import { onAuthStateChanged } from 'firebase/auth';
 import { getUserProfile } from './services/routes';
+
+const ROUTE_TITLES = {
+  '/login': 'Login',
+  '/intake': 'Intake',
+  '/dashboard': 'Dashboard',
+  '/housing': 'Housing',
+  '/community': 'Community',
+  '/resources': 'Resources',
+  '/insurance': 'Insurance',
+  '/assistant': 'Assistant',
+};
+
+function RouteTitleManager() {
+  const location = useLocation();
+
+  useEffect(() => {
+    const knownTitle = ROUTE_TITLES[location.pathname];
+    if (knownTitle) {
+      document.title = knownTitle;
+      return;
+    }
+
+    const firstSegment = location.pathname.split('/').filter(Boolean)[0];
+    const fallbackTitle = firstSegment
+      ? `${firstSegment.charAt(0).toUpperCase()}${firstSegment.slice(1)}`
+      : 'Recovery Hub';
+    document.title = fallbackTitle;
+  }, [location.pathname]);
+
+  return null;
+}
 
 export default function App() {
   const [currentUser, setCurrentUser] = useState(null);
@@ -60,6 +91,7 @@ export default function App() {
 
   return (
     <Router>
+      <RouteTitleManager />
       <Routes>
         <Route 
           path="/login" 
